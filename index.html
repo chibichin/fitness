@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>Fitness Record — v1.0 Final</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div><h1>Fitness Record</h1><p id="headerDate"></p></div>
+</header>
+
+<main>
+  <section id="todayView" class="view active">
+    <div class="page-title"><h2>Today</h2><span></span></div>
+
+    <article class="card">
+      <h3>Today's weight</h3>
+      <div class="metric-row">
+        <label><span>Weight</span><div class="unit-input"><input id="todayWeight" type="number" step="0.1" min="40"><b>lb</b></div></label>
+        <label><span>Body fat</span><div class="unit-input"><input id="todayBodyFat" type="number" step="0.1" min="1" max="70"><b>%</b></div></label>
+        <button id="saveMetricsBtn">Save</button>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="section-head">
+        <h3>One week calendar</h3>
+        <button id="backThisWeekBtn" class="secondary hidden">Back to this week</button>
+      </div>
+      <div class="week-wrap">
+        <button id="previousWeekBtn" class="secondary icon-button" aria-label="Previous week">‹</button>
+        <div id="weekStrip" class="week-strip"></div>
+        <button id="nextWeekBtn" class="secondary icon-button" aria-label="Next week">›</button>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="section-head">
+        <div>
+          <h3 id="workoutTitle">Today's workout</h3>
+          <p id="selectedDateLabel" class="muted"></p>
+        </div>
+        <button id="openAddWorkoutBtn">Add</button>
+      </div>
+      <div id="workoutSections"></div>
+    </article>
+  </section>
+
+  <section id="plansView" class="view">
+    <div class="section-head page-heading"><h2>Plans</h2><button id="addPlanBtn">Add plan</button></div>
+    <div id="plansList"></div>
+  </section>
+
+  <section id="libraryView" class="view">
+    <div class="section-head page-heading"><h2>Library</h2><button id="addExerciseBtn">Add exercise</button></div>
+    <input id="librarySearch" type="search" placeholder="Search exercises">
+    <div id="libraryList"></div>
+  </section>
+
+  <section id="progressView" class="view">
+    <div class="page-heading"><h2>Progress</h2></div>
+    <article id="progressSummary" class="card"></article>
+    <article class="card">
+      <h3>Recent records</h3>
+      <div id="progressHistory"></div>
+    </article>
+  </section>
+
+  <section id="settingsView" class="view">
+    <div class="page-heading"><h2>Settings</h2></div>
+    <article class="card">
+      <h3>Data</h3>
+      <button id="exportBackupBtn" class="full">Export backup</button>
+      <label class="file-button secondary full">Restore backup<input id="restoreBackupInput" type="file" accept=".json,application/json"></label>
+      <button id="clearDataBtn" class="danger full">Clear all data</button>
+    </article>
+  </section>
+</main>
+
+<nav class="bottom-nav">
+  <button data-view="todayView" class="active">Today</button>
+  <button data-view="plansView">Plans</button>
+  <button data-view="libraryView">Library</button>
+  <button data-view="progressView">Progress</button>
+  <button data-view="settingsView">Settings</button>
+</nav>
+
+<dialog id="addWorkoutDialog">
+  <form id="addWorkoutForm">
+    <div class="dialog-title"><h3>Add to workout</h3><button type="button" class="secondary icon-button" data-close="addWorkoutDialog">×</button></div>
+
+    <label class="radio-card">
+      <input type="radio" name="addMode" value="plan" checked>
+      <span><b>Plan</b><small>Add a saved plan</small></span>
+    </label>
+    <div id="addPlanPanel"><select id="availablePlansSelect"></select></div>
+
+    <label class="radio-card">
+      <input type="radio" name="addMode" value="exercise">
+      <span><b>Exercise</b><small>Add one Strength or Cardio exercise</small></span>
+    </label>
+    <div id="addExercisePanel" class="hidden">
+      <select id="availableExercisesSelect"></select>
+      <div id="strengthQuickFields" class="two-col">
+        <label><span>Sets</span><input id="quickSets" type="number" min="1" value="2"></label>
+        <label><span>Reps</span><input id="quickReps" type="number" min="1" value="12"></label>
+      </div>
+      <div id="cardioQuickFields" class="hidden">
+        <div id="quickCardioIntervals"></div>
+        <button id="addQuickCardioIntervalBtn" type="button" class="secondary full">Add minutes</button>
+      </div>
+    </div>
+
+    <div class="dialog-actions">
+      <button type="button" class="secondary" data-close="addWorkoutDialog">Cancel</button>
+      <button type="submit">Add</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="exerciseDialog">
+  <form id="exerciseForm">
+    <div class="dialog-title"><h3 id="exerciseDialogTitle">Add exercise</h3><button type="button" class="secondary icon-button" data-close="exerciseDialog">×</button></div>
+    <input id="exerciseId" type="hidden">
+    <label><span>Name</span><input id="exerciseName" required></label>
+    <label><span>Category</span>
+      <select id="exerciseCategory">
+        <option value="warmup">Warm up</option>
+        <option value="strength">Strength</option>
+        <option value="cardio">Cardio</option>
+        <option value="flexibility">Flexibility</option>
+      </select>
+    </label>
+    <label><span>Muscle group</span><input id="exerciseMuscle"></label>
+    <label><span>Reference photo</span><input id="exercisePhoto" type="file" accept="image/*"></label>
+    <label><span>Reference link</span><input id="exerciseLink" type="url" placeholder="YouTube, Instagram, article..."></label>
+    <label><span>Notes</span><textarea id="exerciseNotes"></textarea></label>
+    <div class="dialog-actions">
+      <button type="button" class="secondary" data-close="exerciseDialog">Cancel</button>
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="planDialog" class="wide-dialog">
+  <form id="planForm">
+    <div class="dialog-title"><h3 id="planDialogTitle">Add plan</h3><button type="button" class="secondary icon-button" data-close="planDialog">×</button></div>
+    <input id="planId" type="hidden">
+    <label><span>Plan name</span><input id="planName" required></label>
+    <label><span>Notes</span><textarea id="planNotes"></textarea></label>
+    <label><span>Category</span><select id="planCategorySelect"><option value="warmup">Warm up</option><option value="strength">Strength</option><option value="cardio">Cardio</option><option value="flexibility">Flexibility</option></select></label>
+    <label><span>Exercise</span><select id="planExerciseSelect"></select></label>
+    <div id="planStrengthFields" class="two-col"><label><span>Sets</span><input id="planSets" type="number" min="1" value="2"></label><label><span>Reps / seconds</span><input id="planReps" type="number" min="1" value="12"></label></div>
+    <div id="planCardioFields" class="hidden"><div id="planCardioIntervals"></div><button id="addPlanCardioIntervalBtn" type="button" class="secondary full">Add minutes</button></div>
+    <button id="addPlanItemInlineBtn" type="button" class="secondary full">Add item</button>
+    <div id="planItemsList"></div>
+    <div class="dialog-actions"><button type="button" class="secondary" data-close="planDialog">Cancel</button><button type="submit">Save plan</button></div>
+  </form>
+</dialog>
+<dialog id="referenceDialog">
+  <div class="reference-dialog-content">
+    <div class="dialog-title"><h3 id="referenceTitle">Reference</h3><button type="button" class="secondary icon-button" data-close="referenceDialog">×</button></div>
+    <img id="referenceImage" class="reference-dialog-image hidden" alt="Exercise reference">
+    <div id="referenceNotes" class="reference-notes hidden"></div>
+    <a id="referenceLink" class="reference-link-button hidden" target="_blank" rel="noopener">Open external link</a>
+    <p id="referenceEmpty" class="muted hidden">No reference saved.</p>
+    <button type="button" class="secondary full" data-close="referenceDialog">Close</button>
+  </div>
+</dialog>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
