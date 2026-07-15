@@ -5,11 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <title>Fitness Record</title>
+  <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
 <header class="topbar">
-  <div><h1>Fitness Record</h1><p id="headerDate"></p></div>
+  <div>
+    <h1>Fitness Record</h1>
+    <p id="headerDate"></p>
+  </div>
 </header>
 
 <main>
@@ -76,6 +80,10 @@
       <button id="exportBackupBtn" class="full">Export backup</button>
       <label class="file-button secondary full">Restore backup<input id="restoreBackupInput" type="file" accept=".json,application/json"></label>
       <button id="clearDataBtn" class="danger full">Clear all data</button>
+    </article>
+    <article class="card">
+      <h3>About</h3>
+      <p class="muted">Version 1.0 — local-first workout notebook.</p>
     </article>
   </section>
 </main>
@@ -151,15 +159,38 @@
     <input id="planId" type="hidden">
     <label><span>Plan name</span><input id="planName" required></label>
     <label><span>Notes</span><textarea id="planNotes"></textarea></label>
-    <label><span>Category</span><select id="planCategorySelect"><option value="warmup">Warm up</option><option value="strength">Strength</option><option value="cardio">Cardio</option><option value="flexibility">Flexibility</option></select></label>
+
+    <div class="section-head"><h3>Plan items</h3></div>
+    <label><span>Category</span>
+      <select id="planCategorySelect">
+        <option value="warmup">Warm up</option>
+        <option value="strength">Strength</option>
+        <option value="cardio">Cardio</option>
+        <option value="flexibility">Flexibility</option>
+      </select>
+    </label>
     <label><span>Exercise</span><select id="planExerciseSelect"></select></label>
-    <div id="planStrengthFields" class="two-col"><label><span>Sets</span><input id="planSets" type="number" min="1" value="2"></label><label><span>Reps / seconds</span><input id="planReps" type="number" min="1" value="12"></label></div>
-    <div id="planCardioFields" class="hidden"><div id="planCardioIntervals"></div><button id="addPlanCardioIntervalBtn" type="button" class="secondary full">Add minutes</button></div>
+
+    <div id="planStrengthFields" class="two-col">
+      <label><span>Sets</span><input id="planSets" type="number" min="1" value="2"></label>
+      <label><span>Reps / seconds</span><input id="planReps" type="number" min="1" value="12"></label>
+    </div>
+
+    <div id="planCardioFields" class="hidden">
+      <div id="planCardioIntervals"></div>
+      <button id="addPlanCardioIntervalBtn" type="button" class="secondary full">Add minutes</button>
+    </div>
+
     <button id="addPlanItemInlineBtn" type="button" class="secondary full">Add item</button>
     <div id="planItemsList"></div>
-    <div class="dialog-actions"><button type="button" class="secondary" data-close="planDialog">Cancel</button><button type="submit">Save plan</button></div>
+
+    <div class="dialog-actions">
+      <button type="button" class="secondary" data-close="planDialog">Cancel</button>
+      <button type="submit">Save plan</button>
+    </div>
   </form>
 </dialog>
+
 <dialog id="referenceDialog">
   <div class="reference-dialog-content">
     <div class="dialog-title"><h3 id="referenceTitle">Reference</h3><button type="button" class="secondary icon-button" data-close="referenceDialog">×</button></div>

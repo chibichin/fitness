@@ -1,4 +1,4 @@
-export const KEY="fitness-record-sprint1-2";
+export const KEY="fitness-record-v1";
 export function makeDefaultState(){
   const exercises=[
     {id:crypto.randomUUID(),name:"Knee Hug",category:"warmup",muscle:"Legs",photo:"",link:"",notes:"",archived:false},
@@ -15,9 +15,15 @@ export function loadState(){
     const s=JSON.parse(localStorage.getItem(KEY));
     if(!s)return makeDefaultState();
     s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
-    s.plans=s.plans.map(p=>({...p,items:[...(p.warmupAdditions||[]),...(p.items||[])].map(i=>({...i,exerciseName:i.exerciseName||s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise"}))}));
-    Object.values(s.workouts).forEach(w=>{w.planIds ||= [];w.items ||= [];w.items.forEach(i=>{i.exerciseName ||= s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise";});});
     s.exercises.forEach(x=>{x.archived ??= false;x.photo ||= "";x.link ||= "";x.notes ||= "";});
+    s.plans = s.plans.map(p=>({
+      ...p,
+      items:[...(p.warmupAdditions||[]),...(p.items||[])].map(i=>({...i,exerciseName:i.exerciseName||s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise"}))
+    }));
+    Object.values(s.workouts).forEach(w=>{
+      w.planIds ||= [];w.items ||= [];
+      w.items.forEach(i=>{i.exerciseName ||= s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise";});
+    });
     return s;
   }catch{return makeDefaultState()}
 }
