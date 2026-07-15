@@ -8,7 +8,7 @@ export function makeDefaultState(){
     {id:crypto.randomUUID(),name:"Bike",category:"cardio",muscle:"",photo:"",link:"",notes:"",archived:false},
     {id:crypto.randomUUID(),name:"Hamstring Stretch",category:"flexibility",muscle:"Legs",photo:"",link:"",notes:"",archived:false}
   ];
-  return {version:"1.0",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+  return {version:"1.1",exercises,plans:[],workouts:{},metrics:{},settings:{}};
 }
 export function loadState(){
   try{
