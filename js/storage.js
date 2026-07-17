@@ -8,29 +8,74 @@ export function makeDefaultState(){
     {id:crypto.randomUUID(),name:"Bike",category:"cardio",muscle:"",photo:"",link:"",notes:"",archived:false},
     {id:crypto.randomUUID(),name:"Hamstring Stretch",category:"flexibility",muscle:"Legs",photo:"",link:"",notes:"",archived:false}
   ];
-  return {version:"1.0",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+  return {version:"1.1",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+}
+function normalizeWorkoutCardio(item){
+  if(item.type!=="cardio")return;
+  const sharedHeartRate=item.targetHr??"";
+  item.intervals=(item.intervals||[10]).map(interval=>{
+    if(typeof interval==="number")return {minutes:interval,heartRate:sharedHeartRate,done:false};
+    return {
+      ...interval,
+      minutes:Number(interval.minutes)||1,
+      heartRate:interval.heartRate??interval.targetHr??sharedHeartRate,
+      done:Boolean(interval.done)
+    };
+  });
+  delete item.targetHr;
+}
+function attachLegacyPlanSources(state,workout){
+  const claimed=new Set(workout.items.filter(item=>item.sourcePlanId).map(item=>item.id));
+  for(const planId of workout.planIds){
+    const plan=state.plans.find(candidate=>candidate.id===planId);
+    if(!plan)continue;
+    (plan.items||[]).forEach((planItem,sourcePlanOrder)=>{
+      const match=workout.items.find(item=>!claimed.has(item.id)&&!item.sourcePlanId&&item.exerciseId===planItem.exerciseId);
+      if(!match)return;
+      match.sourcePlanId=plan.id;
+      match.sourcePlanName=plan.name;
+      match.sourcePlanItemId=planItem.id;
+      match.sourcePlanOrder=sourcePlanOrder;
+      claimed.add(match.id);
+    });
+  }
+  workout.items.forEach(item=>{
+    if(!item.sourcePlanId)return;
+    const plan=state.plans.find(candidate=>candidate.id===item.sourcePlanId);
+    item.sourcePlanName ||= plan?.name||"Saved plan";
+    if(item.sourcePlanOrder==null&&plan){
+      const index=(plan.items||[]).findIndex(planItem=>planItem.id===item.sourcePlanItemId||planItem.exerciseId===item.exerciseId);
+      if(index>=0)item.sourcePlanOrder=index;
+    }
+  });
 }
 export function loadState(){
   try{
-    const s=JSON.parse(localStorage.getItem(KEY));
-    if(!s)return makeDefaultState();
-    s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
-    s.exercises.forEach(x=>{x.archived ??= false;x.photo ||= "";x.link ||= "";x.notes ||= "";});
-    s.plans = s.plans.map(p=>({
-      ...p,
-      items:[...(p.warmupAdditions||[]),...(p.items||[])].map(i=>({...i,exerciseName:i.exerciseName||s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise"}))
-    }));
-    Object.values(s.workouts).forEach(w=>{
-      w.planIds ||= [];w.items ||= [];
-      w.items.forEach(i=>{i.exerciseName ||= s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise";});
+    const state=JSON.parse(localStorage.getItem(KEY));
+    if(!state)return makeDefaultState();
+    state.exercises ||= [];state.plans ||= [];state.workouts ||= {};state.metrics ||= {};state.settings ||= {};
+    state.exercises.forEach(exercise=>{exercise.archived ??= false;exercise.photo ||= "";exercise.link ||= "";exercise.notes ||= "";});
+    state.plans=state.plans.map(plan=>{
+      const {warmupAdditions,...record}=plan,seen=new Set();
+      const items=[...(warmupAdditions||[]),...(plan.items||[])].filter(item=>{const key=item.id||`${item.exerciseId}-${item.category}`;if(seen.has(key))return false;seen.add(key);return true;}).map(item=>({...item,exerciseName:item.exerciseName||state.exercises.find(exercise=>exercise.id===item.exerciseId)?.name||"Exercise"}));
+      return {...record,items};
     });
-    return s;
+    Object.values(state.workouts).forEach(workout=>{
+      workout.planIds=[...new Set(workout.planIds||[])];workout.items ||= [];
+      workout.items.forEach(item=>{
+        item.exerciseName ||= state.exercises.find(exercise=>exercise.id===item.exerciseId)?.name||"Exercise";
+        normalizeWorkoutCardio(item);
+      });
+      attachLegacyPlanSources(state,workout);
+    });
+    state.version="1.1";
+    return state;
   }catch{return makeDefaultState()}
 }
-export function saveState(s){localStorage.setItem(KEY,JSON.stringify(s))}
-export function downloadBackup(s){
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(new Blob([JSON.stringify(s,null,2)],{type:"application/json"}));
-  a.download=`fitness-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+export function saveState(state){localStorage.setItem(KEY,JSON.stringify(state))}
+export function downloadBackup(state){
+  const link=document.createElement("a");
+  link.href=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:"application/json"}));
+  link.download=`fitness-backup-${new Date().toISOString().slice(0,10)}.json`;link.click();
+  setTimeout(()=>URL.revokeObjectURL(link.href),1000);
 }

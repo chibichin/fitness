@@ -10,6 +10,7 @@ let pendingExerciseRemoval=null;
 const $=id=>document.getElementById(id);
 const sections=["warmup","strength","cardio","flexibility"];
 const labels={warmup:"Warm up",strength:"Strength",cardio:"Cardio",flexibility:"Flexibility"};
+function planById(id){return state.plans.find(x=>x.id===id)}
 
 function localDateKey(d=new Date()){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0");return `${y}-${m}-${day}`}
 function todayKey(){return localDateKey(new Date())}
@@ -42,20 +43,43 @@ function renderWeek(){
     b.innerHTML=`<small>${new Intl.DateTimeFormat("en-US",{weekday:"narrow"}).format(d)}</small><b>${d.getDate()}</b><em>${status}</em>`;
     b.onclick=()=>{selectedDate=key;renderAll()};host.appendChild(b);
   }
-  $("backThisWeekBtn").classList.toggle("hidden",weekOffset===0&&selectedDate===todayKey());
+  const atToday=weekOffset===0&&selectedDate===todayKey(),backBtn=$("backThisWeekBtn");
+  backBtn.classList.toggle("slot-hidden",atToday);backBtn.disabled=atToday;backBtn.setAttribute("aria-hidden",String(atToday));
+}
+function workoutGroups(w){
+  const groups=[];
+  const groupedIds=new Set();
+  for(const planId of w.planIds||[]){
+    const entries=w.items.filter(x=>x.sourcePlanId===planId).sort((a,b)=>(a.sourcePlanOrder??9999)-(b.sourcePlanOrder??9999));
+    if(!entries.length)continue;
+    const plan=planById(planId),name=plan?.name||entries[0]?.sourcePlanName||"Saved plan";
+    groups.push({key:`plan-${planId}`,name,entries});
+    entries.forEach(x=>groupedIds.add(x.id));
+  }
+  const orphanPlanIds=[...new Set(w.items.filter(x=>x.sourcePlanId&&!groupedIds.has(x.id)).map(x=>x.sourcePlanId))];
+  for(const planId of orphanPlanIds){
+    const entries=w.items.filter(x=>x.sourcePlanId===planId&&!groupedIds.has(x.id)).sort((a,b)=>(a.sourcePlanOrder??9999)-(b.sourcePlanOrder??9999));
+    if(!entries.length)continue;
+    groups.push({key:`plan-${planId}`,name:planById(planId)?.name||entries[0]?.sourcePlanName||"Saved plan",entries});
+    entries.forEach(x=>groupedIds.add(x.id));
+  }
+  for(const category of sections){
+    const entries=w.items.filter(x=>!groupedIds.has(x.id)&&itemCategory(x)===category);
+    if(entries.length)groups.push({key:`category-${category}`,name:labels[category],entries});
+  }
+  return groups;
 }
 function renderWorkout(){
   const host=$("workoutSections"),w=workoutFor(selectedDate);host.innerHTML="";
   if(!w?.items?.length){host.innerHTML='<p class="muted">No workout planned for this date.</p>';return}
-  for(const category of sections){
-    const entries=w.items.filter(x=>itemCategory(x)===category);
-    if(!entries.length)continue;
-    const doneCount=entries.filter(isDone).length;
+  for(const group of workoutGroups(w)){
+    const entries=group.entries,doneCount=entries.filter(isDone).length;
     const section=document.createElement("section");section.className="workout-section";
     const header=document.createElement("button");header.className="workout-section-header";
-    header.innerHTML=`<span><b>${labels[category]}</b><small>${doneCount}/${entries.length} complete</small></span><b>⌄</b>`;
+    const titleWrap=document.createElement("span"),title=document.createElement("b"),progress=document.createElement("small"),chevron=document.createElement("b");
+    title.textContent=group.name;progress.textContent=`${doneCount}/${entries.length} complete`;chevron.textContent="⌄";titleWrap.append(title,progress);header.append(titleWrap,chevron);
     const body=document.createElement("div");body.className="workout-section-body";
-    const storageKey=`section-open-${selectedDate}-${category}`;
+    const storageKey=`section-open-${selectedDate}-${group.key}`;
     let open=localStorage.getItem(storageKey)!=="false";
     if(doneCount===entries.length)open=false;
     body.classList.toggle("hidden",!open);
@@ -91,14 +115,21 @@ function renderWorkoutItem(item){
   card.querySelector(".reference").onclick=()=>showReference(ex);
   const body=card.querySelector(".item-body");
   if(item.type==="cardio"){
-    (item.intervals||[]).forEach(interval=>{
-      const row=document.createElement("div");row.className="set-row";
-      row.innerHTML=`<div class="unit-input"><input type="number" min="1" value="${interval.minutes}"><b>min</b></div><input placeholder="Target HR" value="${item.targetHr||""}"><button class="${interval.done?"":"secondary"}">${interval.done?"✓":"○"}</button>`;
-      row.children[0].querySelector("input").onchange=e=>{interval.minutes=Number(e.target.value)||1;saveState(state)};
-      row.children[1].onchange=e=>{item.targetHr=e.target.value;saveState(state)};
-      row.children[2].onclick=()=>{interval.done=!interval.done;persist()};
+    item.intervals ||= [{minutes:10,heartRate:"",done:false}];
+    item.intervals.forEach((interval,index)=>{
+      const row=document.createElement("div");row.className="cardio-interval-row";
+      row.innerHTML=`<div class="cardio-interval-head"><b>Split ${index+1}</b><button type="button" class="secondary remove-interval" aria-label="Remove split ${index+1}">×</button></div><div class="cardio-interval-fields"><div class="unit-input"><input type="number" min="1" value="${interval.minutes}" aria-label="Split ${index+1} minutes"><b>min</b></div><div class="unit-input"><input type="number" min="1" value="${interval.heartRate??""}" placeholder="Heart rate" aria-label="Split ${index+1} heart rate"><b>bpm</b></div><button type="button" class="${interval.done?"":"secondary"}" aria-label="Mark split ${index+1} ${interval.done?"not complete":"complete"}">${interval.done?"✓":"○"}</button></div>`;
+      row.querySelector('.cardio-interval-fields .unit-input:nth-child(1) input').onchange=e=>{interval.minutes=Number(e.target.value)||1;saveState(state)};
+      row.querySelector('.cardio-interval-fields .unit-input:nth-child(2) input').onchange=e=>{interval.heartRate=e.target.value;saveState(state)};
+      row.querySelector('.cardio-interval-fields button').onclick=()=>{interval.done=!interval.done;persist()};
+      const remove=row.querySelector('.remove-interval');remove.disabled=item.intervals.length<=1;
+      remove.onclick=()=>{if(item.intervals.length<=1)return;item.intervals.splice(index,1);persist()};
       body.appendChild(row);
     });
+    const controls=document.createElement("div");controls.className="cardio-controls";
+    controls.innerHTML='<button type="button" class="secondary">＋ Interval</button>';
+    controls.firstElementChild.onclick=()=>{const last=item.intervals.at(-1)||{minutes:10};item.intervals.push({minutes:last.minutes||10,heartRate:"",done:false});persist()};
+    body.appendChild(controls);
   }else{
     item.sets.forEach(set=>{
       const row=document.createElement("div");row.className="set-row";
@@ -157,17 +188,26 @@ function renderPlanIntervals(){
   $("planCardioIntervals").querySelectorAll("input").forEach(x=>x.onchange=e=>intervalDraft[Number(e.target.dataset.i)]=Number(e.target.value)||1);
   $("planCardioIntervals").querySelectorAll(".remove-plan-interval").forEach(b=>b.onclick=()=>{if(intervalDraft.length>1){intervalDraft.splice(Number(b.dataset.i),1);renderPlanIntervals()}});
 }
+function movePlanItem(id,newIndex){
+  const oldIndex=planDraft.items.findIndex(x=>x.id===id);if(oldIndex<0)return;
+  const [item]=planDraft.items.splice(oldIndex,1);newIndex=Math.max(0,Math.min(newIndex,planDraft.items.length));planDraft.items.splice(newIndex,0,item);renderPlanDraft();
+}
 function renderPlanDraft(){
-  const grouped=sections.map(category=>{
-    const list=(planDraft.items||[]).filter(x=>x.category===category);
-    if(!list.length)return "";
-    return `<h3 class="plan-items-heading">${labels[category]}</h3>`+list.map(x=>{
-      const ex=exById(x.exerciseId),summary=x.type==="cardio"?`${(x.intervals||[]).join(" / ")} min`:`${x.sets} × ${x.reps}`;
-      return `<div class="plan-item"><div class="section-head"><div><strong>${ex?.name||x.exerciseName||"Exercise"}</strong><div class="muted">${summary}</div></div><button type="button" class="secondary remove-plan-item" data-id="${x.id}">Remove</button></div></div>`;
-    }).join("");
-  }).join("");
-  $("planItemsList").innerHTML=grouped||'<p class="muted">No items.</p>';
-  $("planItemsList").querySelectorAll(".remove-plan-item").forEach(b=>b.onclick=()=>{planDraft.items=planDraft.items.filter(x=>x.id!==b.dataset.id);renderPlanDraft();populatePlanExerciseOptions()});
+  const list=planDraft.items||[],host=$("planItemsList");
+  host.innerHTML=list.map((x,index)=>{
+    const ex=exById(x.exerciseId),summary=x.type==="cardio"?`${(x.intervals||[]).join(" / ")} min`:`${x.sets} × ${x.reps}`;
+    return `<div class="plan-item" draggable="true" data-id="${x.id}"><div class="plan-item-main"><span class="drag-handle" aria-hidden="true">≡</span><div class="plan-item-content"><strong>${ex?.name||x.exerciseName||"Exercise"}</strong><div class="muted">${summary}</div><span class="plan-item-category">${labels[x.category]||"Exercise"}</span></div></div><div class="plan-item-actions"><button type="button" class="secondary move-plan-up" data-id="${x.id}" ${index===0?"disabled":""} aria-label="Move up">↑</button><button type="button" class="secondary move-plan-down" data-id="${x.id}" ${index===list.length-1?"disabled":""} aria-label="Move down">↓</button><button type="button" class="secondary remove-plan-item" data-id="${x.id}">Remove</button></div></div>`;
+  }).join("")||'<p class="muted">No items.</p>';
+  host.querySelectorAll(".remove-plan-item").forEach(b=>b.onclick=()=>{planDraft.items=planDraft.items.filter(x=>x.id!==b.dataset.id);renderPlanDraft();populatePlanExerciseOptions()});
+  host.querySelectorAll(".move-plan-up").forEach(b=>b.onclick=()=>{const i=planDraft.items.findIndex(x=>x.id===b.dataset.id);movePlanItem(b.dataset.id,i-1)});
+  host.querySelectorAll(".move-plan-down").forEach(b=>b.onclick=()=>{const i=planDraft.items.findIndex(x=>x.id===b.dataset.id);movePlanItem(b.dataset.id,i+1)});
+  let draggedId=null;
+  host.querySelectorAll(".plan-item").forEach(card=>{
+    card.ondragstart=e=>{draggedId=card.dataset.id;card.classList.add("dragging");e.dataTransfer.effectAllowed="move"};
+    card.ondragend=()=>{card.classList.remove("dragging");draggedId=null};
+    card.ondragover=e=>{e.preventDefault();e.dataTransfer.dropEffect="move"};
+    card.ondrop=e=>{e.preventDefault();if(!draggedId||draggedId===card.dataset.id)return;const draggedIndex=planDraft.items.findIndex(x=>x.id===draggedId),targetIndex=planDraft.items.findIndex(x=>x.id===card.dataset.id),rect=card.getBoundingClientRect(),after=e.clientY>rect.top+rect.height/2;let newIndex=targetIndex+(after?1:0);if(draggedIndex<newIndex)newIndex--;movePlanItem(draggedId,newIndex)};
+  });
 }
 function addCurrentPlanItem(){
   const id=$("planExerciseSelect").value,ex=exById(id);if(!ex)return alert("No exercise available.");if(planDraft.items.some(x=>x.exerciseId===id))return alert("Exercise already added.");
@@ -177,11 +217,14 @@ function addCurrentPlanItem(){
 }
 function addPlanToWorkout(plan){
   const w=workoutFor(selectedDate,true);if(w.planIds.includes(plan.id))return false;
-  const used=new Set(w.items.map(x=>x.exerciseId)),source=(plan.items||[]).filter(x=>!used.has(x.exerciseId));
-  for(const x of source){const ex=exById(x.exerciseId),exerciseName=ex?.name||x.exerciseName||"Exercise";
-    if(x.type==="cardio")w.items.push({id:crypto.randomUUID(),exerciseId:x.exerciseId,exerciseName,category:"cardio",type:"cardio",intervals:(x.intervals||[10]).map(minutes=>({minutes,done:false})),targetHr:""});
-    else w.items.push({id:crypto.randomUUID(),exerciseId:x.exerciseId,exerciseName,category:x.category,type:"exercise",sets:Array.from({length:x.sets||1},()=>({weight:0,reps:x.reps||1,done:false}))});
-  }
+  const used=new Set(w.items.map(x=>x.exerciseId));
+  (plan.items||[]).forEach((x,sourcePlanOrder)=>{
+    if(used.has(x.exerciseId))return;
+    const ex=exById(x.exerciseId),exerciseName=ex?.name||x.exerciseName||"Exercise",sourceMeta={sourcePlanId:plan.id,sourcePlanName:plan.name,sourcePlanItemId:x.id,sourcePlanOrder};
+    if(x.type==="cardio")w.items.push({id:crypto.randomUUID(),exerciseId:x.exerciseId,exerciseName,category:"cardio",type:"cardio",intervals:(x.intervals||[10]).map(minutes=>({minutes,heartRate:"",done:false})),...sourceMeta});
+    else w.items.push({id:crypto.randomUUID(),exerciseId:x.exerciseId,exerciseName,category:x.category,type:"exercise",sets:Array.from({length:x.sets||1},()=>({weight:0,reps:x.reps||1,done:false})),...sourceMeta});
+    used.add(x.exerciseId);
+  });
   w.planIds.push(plan.id);return true;
 }
 
@@ -278,7 +321,7 @@ $("removeExerciseForm").onsubmit=e=>{
   persist();
 };
 document.querySelectorAll('input[name="addMode"]').forEach(r=>r.onchange=updateAddMode);$("availableExercisesSelect").onchange=updateQuickExerciseFields;$("addQuickCardioIntervalBtn").onclick=()=>{intervalDraft.push(intervalDraft.at(-1)||10);renderQuickIntervals()};
-$("addWorkoutForm").onsubmit=e=>{e.preventDefault();const mode=document.querySelector('input[name="addMode"]:checked').value,w=workoutFor(selectedDate,true);if(mode==="plan"){const p=state.plans.find(x=>x.id===$("availablePlansSelect").value);if(!p)return alert("No plan available.");if(!addPlanToWorkout(p))return alert("Plan already added.")}else{const id=$("availableExercisesSelect").value,ex=exById(id);if(!ex)return alert("No exercise available.");if(w.items.some(x=>x.exerciseId===id))return alert("Exercise already added.");if(ex.category==="cardio")w.items.push({id:crypto.randomUUID(),exerciseId:id,exerciseName:ex.name,category:"cardio",type:"cardio",intervals:intervalDraft.map(minutes=>({minutes,done:false})),targetHr:""});else w.items.push({id:crypto.randomUUID(),exerciseId:id,exerciseName:ex.name,category:"strength",type:"exercise",sets:Array.from({length:Number($("quickSets").value)||2},()=>({weight:0,reps:Number($("quickReps").value)||12,done:false}))})}closeDialog("addWorkoutDialog");persist()};
+$("addWorkoutForm").onsubmit=e=>{e.preventDefault();const mode=document.querySelector('input[name="addMode"]:checked').value,w=workoutFor(selectedDate,true);if(mode==="plan"){const p=state.plans.find(x=>x.id===$("availablePlansSelect").value);if(!p)return alert("No plan available.");if(!addPlanToWorkout(p))return alert("Plan already added.")}else{const id=$("availableExercisesSelect").value,ex=exById(id);if(!ex)return alert("No exercise available.");if(w.items.some(x=>x.exerciseId===id))return alert("Exercise already added.");if(ex.category==="cardio")w.items.push({id:crypto.randomUUID(),exerciseId:id,exerciseName:ex.name,category:"cardio",type:"cardio",intervals:intervalDraft.map(minutes=>({minutes,heartRate:"",done:false}))});else w.items.push({id:crypto.randomUUID(),exerciseId:id,exerciseName:ex.name,category:"strength",type:"exercise",sets:Array.from({length:Number($("quickSets").value)||2},()=>({weight:0,reps:Number($("quickReps").value)||12,done:false}))})}closeDialog("addWorkoutDialog");persist()};
 $("addExerciseBtn").onclick=()=>openExercise();
 $("exerciseForm").onsubmit=async e=>{e.preventDefault();const id=$("exerciseId").value,name=$("exerciseName").value.trim();if(!name)return;const exact=state.exercises.some(x=>x.id!==id&&normalizeName(x.name)===normalizeName(name));if(exact)return alert("This exercise already exists.");const similar=similarName(name,id);if(similar&&!confirm(`A similar exercise already exists: ${similar.name}\n\nSave anyway?`))return;const old=id?exById(id):null;let photo=old?.photo||"";if($("exercisePhoto").files[0])photo=await fileToDataUrl($("exercisePhoto").files[0]);const record={id:id||crypto.randomUUID(),name,category:$("exerciseCategory").value,muscle:$("exerciseMuscle").value.trim(),photo,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};if(id)state.exercises[state.exercises.findIndex(x=>x.id===id)]=record;else state.exercises.push(record);closeDialog("exerciseDialog");persist()};
 $("librarySearch").oninput=renderLibrary;
