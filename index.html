@@ -32,7 +32,7 @@
     <article class="card">
       <div class="section-head">
         <h3>One week calendar</h3>
-        <button id="backThisWeekBtn" class="secondary calendar-return-slot is-invisible">Back to Today</button>
+        <button id="backThisWeekBtn" class="secondary hidden">Back to this week</button>
       </div>
       <div class="week-wrap">
         <button id="previousWeekBtn" class="secondary icon-button" aria-label="Previous week">‹</button>
@@ -83,7 +83,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.1 — safer logging and plan-based workout panels.</p>
+      <p class="muted">Version 1.0.1 — local-first workout notebook.</p>
     </article>
   </section>
 </main>
@@ -144,10 +144,6 @@
     </label>
     <label><span>Muscle group</span><input id="exerciseMuscle"></label>
     <label><span>Reference photo</span><input id="exercisePhoto" type="file" accept="image/*"></label>
-    <div id="exercisePhotoPreviewWrap" class="photo-preview-wrap hidden">
-      <img id="exercisePhotoPreview" class="reference-photo" alt="Exercise reference preview">
-      <button id="removeExercisePhotoBtn" type="button" class="secondary full">Remove photo</button>
-    </div>
     <label><span>Reference link</span><input id="exerciseLink" type="url" placeholder="YouTube, Instagram, article..."></label>
     <label><span>Notes</span><textarea id="exerciseNotes"></textarea></label>
     <div class="dialog-actions">
@@ -195,6 +191,18 @@
   </form>
 </dialog>
 
+<dialog id="removeExerciseDialog">
+  <form id="removeExerciseForm">
+    <div class="dialog-title"><h3>Remove exercise?</h3><button type="button" class="secondary icon-button" data-close="removeExerciseDialog">×</button></div>
+    <p>Remove <strong id="removeExerciseName">this exercise</strong> from this workout?</p>
+    <p class="muted">This exercise and its entered data for this date will be removed. The Library exercise and saved plan will not be changed.</p>
+    <div class="dialog-actions">
+      <button type="button" class="secondary" data-close="removeExerciseDialog">Cancel</button>
+      <button type="submit" class="danger">Remove</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="referenceDialog">
   <div class="reference-dialog-content">
     <div class="dialog-title"><h3 id="referenceTitle">Reference</h3><button type="button" class="secondary icon-button" data-close="referenceDialog">×</button></div>
@@ -205,11 +213,6 @@
     <button type="button" class="secondary full" data-close="referenceDialog">Close</button>
   </div>
 </dialog>
-
-<div id="undoSnackbar" class="snackbar hidden" role="status" aria-live="polite">
-  <span id="undoSnackbarText">Exercise removed.</span>
-  <button id="undoSnackbarBtn" type="button">Undo</button>
-</div>
 
 <script type="module" src="js/app.js"></script>
 </body>
