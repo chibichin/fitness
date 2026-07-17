@@ -32,7 +32,7 @@
     <article class="card">
       <div class="section-head">
         <h3>One week calendar</h3>
-        <button id="backThisWeekBtn" class="secondary calendar-return" aria-hidden="true">Back to Today</button>
+        <button id="backThisWeekBtn" class="secondary calendar-return-slot is-invisible">Back to Today</button>
       </div>
       <div class="week-wrap">
         <button id="previousWeekBtn" class="secondary icon-button" aria-label="Previous week">‹</button>
@@ -83,7 +83,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.1 — local-first workout notebook.</p>
+      <p class="muted">Version 1.1 — safer logging and plan-based workout panels.</p>
     </article>
   </section>
 </main>
@@ -144,13 +144,10 @@
     </label>
     <label><span>Muscle group</span><input id="exerciseMuscle"></label>
     <label><span>Reference photo</span><input id="exercisePhoto" type="file" accept="image/*"></label>
-    <div id="exercisePhotoTools" class="photo-tools hidden">
-      <img id="exercisePhotoPreview" class="exercise-photo-preview" alt="Current reference photo">
-      <div class="photo-actions">
-        <button id="removeExercisePhotoBtn" type="button" class="secondary danger-soft">Remove photo</button>
-      </div>
+    <div id="exercisePhotoPreviewWrap" class="photo-preview-wrap hidden">
+      <img id="exercisePhotoPreview" class="reference-photo" alt="Exercise reference preview">
+      <button id="removeExercisePhotoBtn" type="button" class="secondary full">Remove photo</button>
     </div>
-    <p id="exercisePhotoStatus" class="muted hidden"></p>
     <label><span>Reference link</span><input id="exerciseLink" type="url" placeholder="YouTube, Instagram, article..."></label>
     <label><span>Notes</span><textarea id="exerciseNotes"></textarea></label>
     <div class="dialog-actions">
@@ -209,9 +206,9 @@
   </div>
 </dialog>
 
-<div id="undoToast" class="undo-toast hidden" role="status" aria-live="polite">
-  <span id="undoToastText">Exercise removed.</span>
-  <button id="undoWorkoutRemoveBtn" type="button" class="secondary">Undo</button>
+<div id="undoSnackbar" class="snackbar hidden" role="status" aria-live="polite">
+  <span id="undoSnackbarText">Exercise removed.</span>
+  <button id="undoSnackbarBtn" type="button">Undo</button>
 </div>
 
 <script type="module" src="js/app.js"></script>
