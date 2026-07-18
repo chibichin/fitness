@@ -21,3 +21,10 @@ dialog{border:0;border-radius:18px;padding:0;width:min(92vw,480px);max-height:90
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .photo-preview-wrap{display:grid;gap:8px}.exercise-photo-preview{width:100%;max-height:260px;object-fit:contain;border-radius:14px;background:var(--soft);border:1px solid var(--line)}
+
+.field-hint{margin:0;min-height:18px}
+.dialog-actions-wrap{flex-wrap:wrap}
+.library-actions{flex-wrap:wrap}
+.list-card .library-actions button{flex:1 1 120px}
+#addToStatus{min-height:18px;margin:0}
+@media(max-width:420px){.dialog-actions-wrap button{flex:1 1 130px}.dialog-actions-wrap button:first-child{flex-basis:100%}.list-card .library-actions button{flex-basis:100px}}

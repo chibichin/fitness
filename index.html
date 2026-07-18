@@ -83,7 +83,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.1 — safer workout logging and plan-based panels.</p>
+      <p class="muted">Version 1.2 — faster add-to flows and previous workout values.</p>
     </article>
   </section>
 </main>
@@ -108,14 +108,15 @@
 
     <label class="radio-card">
       <input type="radio" name="addMode" value="exercise">
-      <span><b>Exercise</b><small>Add one Strength or Cardio exercise</small></span>
+      <span><b>Exercise</b><small>Add one exercise from your Library</small></span>
     </label>
     <div id="addExercisePanel" class="hidden">
       <select id="availableExercisesSelect"></select>
       <div id="strengthQuickFields" class="two-col">
         <label><span>Sets</span><input id="quickSets" type="number" min="1" value="2"></label>
-        <label><span>Reps</span><input id="quickReps" type="number" min="1" value="12"></label>
+        <label><span>Reps / seconds</span><input id="quickReps" type="number" min="1" value="12"></label>
       </div>
+      <p id="quickPreviousWeightHint" class="muted field-hint hidden"></p>
       <div id="cardioQuickFields" class="hidden">
         <div id="quickCardioIntervals"></div>
         <button id="addQuickCardioIntervalBtn" type="button" class="secondary full">Add minutes</button>
@@ -150,9 +151,55 @@
     </div>
     <label><span>Reference link</span><input id="exerciseLink" type="url" placeholder="YouTube, Instagram, article..."></label>
     <label><span>Notes</span><textarea id="exerciseNotes"></textarea></label>
-    <div class="dialog-actions">
+    <div class="dialog-actions dialog-actions-wrap">
       <button type="button" class="secondary" data-close="exerciseDialog">Cancel</button>
-      <button type="submit">Save</button>
+      <button id="saveExerciseAndAddBtn" type="submit" name="saveAction" value="save-add" class="secondary">Save & Add to…</button>
+      <button type="submit" name="saveAction" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="addToDialog">
+  <form id="addToForm">
+    <div class="dialog-title"><h3>Add <span id="addToExerciseName"></span> to…</h3><button type="button" class="secondary icon-button" data-close="addToDialog">×</button></div>
+    <input id="addToExerciseId" type="hidden">
+
+    <label class="radio-card">
+      <input type="radio" name="addToTarget" value="today" checked>
+      <span><b>Today</b><small id="addToTodayLabel"></small></span>
+    </label>
+
+    <label class="radio-card">
+      <input type="radio" name="addToTarget" value="existing-plan">
+      <span><b>Existing plan</b><small>Add this exercise to a saved plan</small></span>
+    </label>
+    <div id="addToExistingPlanPanel" class="hidden">
+      <label><span>Plan</span><select id="addToPlanSelect"></select></label>
+    </div>
+
+    <label class="radio-card">
+      <input type="radio" name="addToTarget" value="new-plan">
+      <span><b>New plan</b><small>Create a plan starting with this exercise</small></span>
+    </label>
+    <div id="addToNewPlanPanel" class="hidden">
+      <label><span>Plan name</span><input id="addToNewPlanName" placeholder="New plan name"></label>
+    </div>
+
+    <div id="addToStrengthFields" class="two-col">
+      <label><span>Sets</span><input id="addToSets" type="number" min="1" value="2"></label>
+      <label><span>Reps / seconds</span><input id="addToReps" type="number" min="1" value="12"></label>
+    </div>
+    <p id="addToPreviousWeightHint" class="muted field-hint hidden"></p>
+
+    <div id="addToCardioFields" class="hidden">
+      <div id="addToCardioIntervals"></div>
+      <button id="addToCardioIntervalBtn" type="button" class="secondary full">Add minutes</button>
+    </div>
+    <p id="addToStatus" class="muted field-hint" aria-live="polite"></p>
+
+    <div class="dialog-actions">
+      <button type="button" class="secondary" data-close="addToDialog">Cancel</button>
+      <button id="confirmAddToBtn" type="submit">Add</button>
     </div>
   </form>
 </dialog>

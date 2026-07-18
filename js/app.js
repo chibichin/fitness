@@ -1,10 +1,11 @@
-import {loadState,saveState,makeDefaultState,downloadBackup} from "./storage.js";
+import {loadState,saveState,makeDefaultState,downloadBackup,uid} from "./storage.js";
 
 let state=loadState();
 let selectedDate=todayKey();
 let weekOffset=0;
 let planDraft=null;
 let intervalDraft=[10,10];
+let addToIntervalDraft=[10,10];
 let pendingWorkoutItemRemoval=null;
 let exercisePhotoObjectUrl="";
 let removeExercisePhotoRequested=false;
@@ -27,6 +28,49 @@ function workoutFor(key,create=false){if(!state.workouts[key]&&create){state.wor
 function normalizeName(s){return s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g,"")}
 function similarName(name,id=""){const n=normalizeName(name);return state.exercises.find(x=>x.id!==id&&(normalizeName(x.name)===n||normalizeName(x.name).includes(n)||n.includes(normalizeName(x.name))))}
 function fileToDataUrl(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
+
+// Shared session/plan helpers. Fitness-specific fields stay inside these builders.
+function previousTrackingValues(activityId,beforeDate){
+  const dates=Object.keys(state.workouts).filter(key=>key<beforeDate).sort().reverse();
+  for(const date of dates){
+    const item=[...(state.workouts[date]?.items||[])].reverse().find(x=>x.exerciseId===activityId&&x.type!=="cardio");
+    if(!item)continue;
+    const raw=(item.sets||[]).map(set=>Number(set?.weight)||0),valid=raw.filter(weight=>weight>0);
+    if(!valid.length)continue;
+    const lastWeight=valid.at(-1);
+    return {date,weights:raw.map(weight=>weight>0?weight:lastWeight),lastWeight};
+  }
+  return null;
+}
+function trackingDefaults(ex){
+  if(ex?.category==="strength")return {sets:2,reps:12};
+  if(ex?.category==="flexibility")return {sets:1,reps:30};
+  if(ex?.category==="warmup")return {sets:1,reps:6};
+  return {sets:1,reps:12};
+}
+function createPlanItem(ex,options={}){
+  if(ex.category==="cardio")return {id:uid(),exerciseId:ex.id,exerciseName:ex.name,category:ex.category,type:"cardio",intervals:[...(options.intervals||[10])]};
+  const defaults=trackingDefaults(ex);
+  return {id:uid(),exerciseId:ex.id,exerciseName:ex.name,category:ex.category,type:"exercise",sets:Number(options.sets)||defaults.sets,reps:Number(options.reps)||defaults.reps};
+}
+function createSessionItem(ex,options={},date=todayKey(),sourceInfo={}){
+  if(ex.category==="cardio")return {id:uid(),exerciseId:ex.id,exerciseName:ex.name,category:ex.category,type:"cardio",intervals:(options.intervals||[10]).map(value=>({minutes:Number(typeof value==="number"?value:value?.minutes)||10,targetHr:"",done:false})),...sourceInfo};
+  const defaults=trackingDefaults(ex),count=Math.max(1,Number(options.sets)||defaults.sets),reps=Number(options.reps)||defaults.reps;
+  const previous=ex.category==="strength"?previousTrackingValues(ex.id,date):null;
+  const sets=Array.from({length:count},(_,index)=>({weight:previous?.weights[index]??previous?.lastWeight??0,reps,done:false}));
+  return {id:uid(),exerciseId:ex.id,exerciseName:ex.name,category:ex.category,type:"exercise",sets,...sourceInfo};
+}
+function addActivityToSession(ex,date,options={},sourceInfo={}){
+  const session=workoutFor(date,true);
+  if(session.items.some(item=>item.exerciseId===ex.id))return false;
+  session.items.push(createSessionItem(ex,options,date,sourceInfo));
+  return true;
+}
+function previousWeightText(ex,date){
+  if(ex?.category!=="strength")return "";
+  const previous=previousTrackingValues(ex.id,date);
+  return previous?`Last used ${previous.lastWeight} lb on ${previous.date}. Weight will be prefilled.`:"";
+}
 
 function renderHeader(){
   $("headerDate").textContent=prettyDate(todayKey());
@@ -152,7 +196,7 @@ function renderPlans(){
     return `<article class="list-card"><strong>${p.name}</strong><p class="muted">${p.notes||""}</p><p>${names.join(", ")||"No items"}</p><div class="actions"><button class="secondary edit-plan" data-id="${p.id}">Edit</button><button class="secondary duplicate-plan" data-id="${p.id}">Duplicate</button><button class="danger delete-plan" data-id="${p.id}">Delete</button></div></article>`;
   }).join("");
   host.querySelectorAll(".edit-plan").forEach(b=>b.onclick=()=>openPlan(state.plans.find(x=>x.id===b.dataset.id)));
-  host.querySelectorAll(".duplicate-plan").forEach(b=>b.onclick=()=>{const p=structuredClone(state.plans.find(x=>x.id===b.dataset.id));p.id=crypto.randomUUID();p.name+=" Copy";state.plans.push(p);persist()});
+  host.querySelectorAll(".duplicate-plan").forEach(b=>b.onclick=()=>{const p=structuredClone(state.plans.find(x=>x.id===b.dataset.id));p.id=uid();p.name+=" Copy";state.plans.push(p);persist()});
   host.querySelectorAll(".delete-plan").forEach(b=>b.onclick=()=>{if(confirm("Delete this plan?")){state.plans=state.plans.filter(x=>x.id!==b.dataset.id);persist()}});
 }
 function openPlan(plan=null){
@@ -190,19 +234,76 @@ function renderPlanDraft(){
 }
 function addCurrentPlanItem(){
   const id=$("planExerciseSelect").value,ex=exById(id);if(!ex)return alert("No exercise available.");if(planDraft.items.some(x=>x.exerciseId===id))return alert("Exercise already added.");
-  let item;if(ex.category==="cardio")item={id:crypto.randomUUID(),exerciseId:id,exerciseName:ex.name,category:"cardio",type:"cardio",intervals:[...intervalDraft]};
-  else item={id:crypto.randomUUID(),exerciseId:id,exerciseName:ex.name,category:ex.category,type:"exercise",sets:Number($("planSets").value)||1,reps:Number($("planReps").value)||1};
-  planDraft.items.push(item);intervalDraft=[10,10];renderPlanDraft();populatePlanExerciseOptions();renderPlanIntervals();
+  const options=ex.category==="cardio"?{intervals:[...intervalDraft]}:{sets:Number($("planSets").value)||1,reps:Number($("planReps").value)||1};
+  planDraft.items.push(createPlanItem(ex,options));intervalDraft=[10,10];renderPlanDraft();populatePlanExerciseOptions();renderPlanIntervals();
 }
 function addPlanToWorkout(plan){
   const w=workoutFor(selectedDate,true),used=new Set(w.items.map(x=>x.exerciseId)),source=(plan.items||[]).filter(x=>!used.has(x.exerciseId));
-  for(const x of source){
-    const ex=exById(x.exerciseId),exerciseName=ex?.name||x.exerciseName||"Exercise",sourceInfo={sourcePlanId:plan.id,sourcePlanName:plan.name,sourcePlanItemId:x.id};
-    if(x.type==="cardio")w.items.push({id:crypto.randomUUID(),exerciseId:x.exerciseId,exerciseName,category:"cardio",type:"cardio",intervals:(x.intervals||[10]).map(value=>({minutes:typeof value==="number"?value:(value.minutes||10),targetHr:"",done:false})),...sourceInfo});
-    else w.items.push({id:crypto.randomUUID(),exerciseId:x.exerciseId,exerciseName,category:x.category,type:"exercise",sets:Array.from({length:x.sets||1},()=>({weight:0,reps:x.reps||1,done:false})),...sourceInfo});
+  for(const item of source){
+    const ex=exById(item.exerciseId)||{id:item.exerciseId,name:item.exerciseName||"Exercise",category:item.category||"strength"};
+    const options=item.type==="cardio"?{intervals:item.intervals||[10]}:{sets:item.sets||1,reps:item.reps||1};
+    const sourceInfo={sourcePlanId:plan.id,sourcePlanName:plan.name,sourcePlanItemId:item.id};
+    w.items.push(createSessionItem(ex,options,selectedDate,sourceInfo));
   }
   if(!w.planIds.includes(plan.id))w.planIds.push(plan.id);
   return source.length;
+}
+
+function addToFormOptions(ex){
+  if(ex.category==="cardio")return {intervals:[...addToIntervalDraft]};
+  return {sets:Number($("addToSets").value)||1,reps:Number($("addToReps").value)||1};
+}
+function renderAddToIntervals(){
+  $("addToCardioIntervals").innerHTML=addToIntervalDraft.map((minutes,index)=>`<div class="set-row"><div class="unit-input"><input data-i="${index}" type="number" min="1" value="${minutes}"><b>min</b></div><span></span><button type="button" class="secondary remove-add-to-interval" data-i="${index}" ${addToIntervalDraft.length<=1?"disabled":""}>×</button></div>`).join("");
+  $("addToCardioIntervals").querySelectorAll("input").forEach(input=>input.onchange=event=>addToIntervalDraft[Number(event.target.dataset.i)]=Number(event.target.value)||1);
+  $("addToCardioIntervals").querySelectorAll(".remove-add-to-interval").forEach(button=>button.onclick=()=>{if(addToIntervalDraft.length>1){addToIntervalDraft.splice(Number(button.dataset.i),1);renderAddToIntervals()}});
+}
+function populateAddToPlans(ex){
+  const select=$("addToPlanSelect");select.innerHTML="";let firstEnabled=null;
+  for(const plan of state.plans){
+    const option=document.createElement("option"),added=(plan.items||[]).some(item=>item.exerciseId===ex.id);
+    option.value=plan.id;option.textContent=added?`✓ ${plan.name} — Added`:plan.name;option.disabled=added;
+    if(!added&&!firstEnabled)firstEnabled=option;
+    select.appendChild(option);
+  }
+  if(!state.plans.length){const option=document.createElement("option");option.value="";option.textContent="No saved plans";option.disabled=true;option.selected=true;select.appendChild(option)}
+  else if(!firstEnabled){const option=document.createElement("option");option.value="";option.textContent="Already added to every plan";option.disabled=true;option.selected=true;select.prepend(option)}
+  else firstEnabled.selected=true;
+}
+function selectedAddToTarget(){return document.querySelector('input[name="addToTarget"]:checked')?.value||"today"}
+function updateAddToTarget(){
+  const target=selectedAddToTarget();
+  $("addToExistingPlanPanel").classList.toggle("hidden",target!=="existing-plan");
+  $("addToNewPlanPanel").classList.toggle("hidden",target!=="new-plan");
+  updateAddToStatus();
+}
+function updateAddToStatus(){
+  const ex=exById($("addToExerciseId").value),target=selectedAddToTarget(),status=$("addToStatus"),button=$("confirmAddToBtn");
+  let message="",disabled=!ex;
+  if(ex&&target==="today"){
+    const added=workoutFor(todayKey())?.items?.some(item=>item.exerciseId===ex.id);
+    if(added){message="Already in today’s workout.";disabled=true}else message="This will be added to today’s workout.";
+  }else if(ex&&target==="existing-plan"){
+    const plan=planById($("addToPlanSelect").value);
+    if(!plan){message="No available plan.";disabled=true}
+    else if((plan.items||[]).some(item=>item.exerciseId===ex.id)){message="Already in this plan.";disabled=true}
+    else message=`This will be added to “${plan.name}”.`;
+  }else if(ex&&target==="new-plan"){
+    const name=$("addToNewPlanName").value.trim();
+    message=name?`A new plan named “${name}” will be created.`:"Enter a name for the new plan.";
+    disabled=!name;
+  }
+  status.textContent=message;button.disabled=disabled;
+}
+function openAddTo(ex){
+  if(!ex)return;
+  $("addToForm").reset();$("addToExerciseId").value=ex.id;$("addToExerciseName").textContent=ex.name;$("addToTodayLabel").textContent=prettyDate(todayKey());
+  document.querySelector('input[name="addToTarget"][value="today"]').checked=true;
+  const defaults=trackingDefaults(ex);$("addToSets").value=defaults.sets;$("addToReps").value=defaults.reps;
+  addToIntervalDraft=[10,10];renderAddToIntervals();populateAddToPlans(ex);
+  const isCardio=ex.category==="cardio";$("addToStrengthFields").classList.toggle("hidden",isCardio);$("addToCardioFields").classList.toggle("hidden",!isCardio);
+  const hint=previousWeightText(ex,todayKey());$("addToPreviousWeightHint").textContent=hint;$("addToPreviousWeightHint").classList.toggle("hidden",!hint);
+  $("addToNewPlanName").value=`${ex.name} Plan`;updateAddToTarget();showDialog("addToDialog");
 }
 
 function renderLibrary(){
@@ -212,7 +313,8 @@ function renderLibrary(){
     if(!list.length)continue;
     const sec=document.createElement("section");sec.className="library-section";sec.innerHTML=`<h3>${labels[category]} (${list.length})</h3>`;
     for(const ex of list){const card=document.createElement("article");card.className="list-card";
-      card.innerHTML=`<strong>${ex.name}</strong><p class="muted">${ex.muscle||"No muscle group"}</p>${ex.photo?`<img src="${ex.photo}" class="reference-photo" alt="">`:""}${ex.notes?`<p>${ex.notes}</p>`:""}${ex.link?`<a href="${ex.link}" target="_blank" rel="noopener">Open reference</a>`:""}<div class="actions"><button class="secondary edit-exercise">Edit</button><button class="danger delete-exercise">Delete</button></div>`;
+      card.innerHTML=`<strong>${ex.name}</strong><p class="muted">${ex.muscle||"No muscle group"}</p>${ex.photo?`<img src="${ex.photo}" class="reference-photo" alt="">`:""}${ex.notes?`<p>${ex.notes}</p>`:""}${ex.link?`<a href="${ex.link}" target="_blank" rel="noopener">Open reference</a>`:""}<div class="actions library-actions"><button class="add-to-exercise">Add to…</button><button class="secondary edit-exercise">Edit</button><button class="danger delete-exercise">Delete</button></div>`;
+      card.querySelector(".add-to-exercise").onclick=()=>openAddTo(ex);
       card.querySelector(".edit-exercise").onclick=()=>openExercise(ex);
       card.querySelector(".delete-exercise").onclick=()=>deleteExercise(ex);
       sec.appendChild(card);
@@ -246,23 +348,44 @@ function openExercise(ex=null){
 }
 function populateAddWorkout(){
   const w=workoutFor(selectedDate,true),used=new Set(w.items.map(x=>x.exerciseId)),planSelect=$("availablePlansSelect");
-  planSelect.innerHTML="";let enabledPlans=0;
+  planSelect.innerHTML="";let firstPlan=null;
   for(const plan of state.plans){
     const total=(plan.items||[]).length,missing=(plan.items||[]).filter(item=>!used.has(item.exerciseId)).length,option=document.createElement("option");
     option.value=plan.id;
     if(!total){option.textContent=`${plan.name} — Empty`;option.disabled=true}
     else if(missing===0){option.textContent=`✓ ${plan.name} — Added`;option.disabled=true}
-    else if(missing<total){option.textContent=`${plan.name} — ${missing} missing`;enabledPlans++}
-    else{option.textContent=plan.name;enabledPlans++}
+    else if(missing<total){option.textContent=`${plan.name} — ${missing} missing`;firstPlan ||= option}
+    else{option.textContent=plan.name;firstPlan ||= option}
     planSelect.appendChild(option);
   }
   if(!state.plans.length){planSelect.innerHTML='<option value="">No saved plans</option>'}
-  else if(!enabledPlans){const option=document.createElement("option");option.value="";option.textContent="No plan items to add";option.selected=true;planSelect.appendChild(option)}
-  $("availableExercisesSelect").innerHTML=state.exercises.filter(x=>!x.archived&&["strength","cardio"].includes(x.category)&&!used.has(x.id)).map(x=>`<option value="${x.id}" data-category="${x.category}">${x.name}</option>`).join("")||'<option value="">No available exercise</option>';
+  else if(!firstPlan){const option=document.createElement("option");option.value="";option.textContent="No plan items to add";option.disabled=true;option.selected=true;planSelect.prepend(option)}
+  else firstPlan.selected=true;
+
+  const exerciseSelect=$("availableExercisesSelect");exerciseSelect.innerHTML="";let firstExercise=null,totalExercises=0;
+  for(const category of sections){
+    const exercises=activeExercises(category);if(!exercises.length)continue;
+    const group=document.createElement("optgroup");group.label=labels[category];
+    for(const ex of exercises){
+      totalExercises++;const option=document.createElement("option"),added=used.has(ex.id);
+      option.value=ex.id;option.dataset.category=ex.category;option.textContent=added?`✓ ${ex.name} — Added`:ex.name;option.disabled=added;
+      if(!added&&!firstExercise)firstExercise=option;
+      group.appendChild(option);
+    }
+    exerciseSelect.appendChild(group);
+  }
+  if(!totalExercises){exerciseSelect.innerHTML='<option value="">No Library exercises</option>'}
+  else if(!firstExercise){const option=document.createElement("option");option.value="";option.textContent="All Library exercises are already added";option.disabled=true;option.selected=true;exerciseSelect.prepend(option)}
+  else firstExercise.selected=true;
   intervalDraft=[10,10];updateQuickExerciseFields();renderQuickIntervals();
 }
 function updateAddMode(){const mode=document.querySelector('input[name="addMode"]:checked').value;$("addPlanPanel").classList.toggle("hidden",mode!=="plan");$("addExercisePanel").classList.toggle("hidden",mode!=="exercise")}
-function updateQuickExerciseFields(){const c=$("availableExercisesSelect").selectedOptions[0]?.dataset.category||"strength";$("strengthQuickFields").classList.toggle("hidden",c!=="strength");$("cardioQuickFields").classList.toggle("hidden",c!=="cardio")}
+function updateQuickExerciseFields(){
+  const ex=exById($("availableExercisesSelect").value),isCardio=ex?.category==="cardio";
+  $("strengthQuickFields").classList.toggle("hidden",!ex||isCardio);$("cardioQuickFields").classList.toggle("hidden",!ex||!isCardio);
+  if(ex&&!isCardio){const defaults=trackingDefaults(ex);$("quickSets").value=defaults.sets;$("quickReps").value=defaults.reps}
+  const hint=previousWeightText(ex,selectedDate);$("quickPreviousWeightHint").textContent=hint;$("quickPreviousWeightHint").classList.toggle("hidden",!hint);
+}
 function renderQuickIntervals(){
   $("quickCardioIntervals").innerHTML=intervalDraft.map((m,i)=>`<div class="set-row"><div class="unit-input"><input data-i="${i}" type="number" min="1" value="${m}"><b>min</b></div><span></span><button type="button" class="secondary remove-quick-interval" data-i="${i}">×</button></div>`).join("");
   $("quickCardioIntervals").querySelectorAll("input").forEach(x=>x.onchange=e=>intervalDraft[Number(e.target.dataset.i)]=Number(e.target.value)||1);
@@ -301,16 +424,19 @@ $("saveMetricsBtn").onclick=()=>{const weight=Number($("todayWeight").value),bod
 $("previousWeekBtn").onclick=()=>{weekOffset--;renderWeek()};$("nextWeekBtn").onclick=()=>{weekOffset++;renderWeek()};$("backThisWeekBtn").onclick=()=>{weekOffset=0;selectedDate=todayKey();renderAll()};
 $("openAddWorkoutBtn").onclick=()=>{resetAddWorkoutDialog();populateAddWorkout();setAddMode("plan");showDialog("addWorkoutDialog")};
 document.querySelectorAll('input[name="addMode"]').forEach(r=>r.onchange=updateAddMode);$("availableExercisesSelect").onchange=updateQuickExerciseFields;$("addQuickCardioIntervalBtn").onclick=()=>{intervalDraft.push(intervalDraft.at(-1)||10);renderQuickIntervals()};
-$("addWorkoutForm").onsubmit=e=>{e.preventDefault();const mode=document.querySelector('input[name="addMode"]:checked').value,w=workoutFor(selectedDate,true);if(mode==="plan"){const p=state.plans.find(x=>x.id===$("availablePlansSelect").value);if(!p)return alert("No plan items available.");if(!addPlanToWorkout(p))return alert("All exercises from this plan are already in the workout.")}else{const id=$("availableExercisesSelect").value,ex=exById(id);if(!ex)return alert("No exercise available.");if(w.items.some(x=>x.exerciseId===id))return alert("Exercise already added.");if(ex.category==="cardio")w.items.push({id:crypto.randomUUID(),exerciseId:id,exerciseName:ex.name,category:"cardio",type:"cardio",intervals:intervalDraft.map(minutes=>({minutes,targetHr:"",done:false}))});else w.items.push({id:crypto.randomUUID(),exerciseId:id,exerciseName:ex.name,category:"strength",type:"exercise",sets:Array.from({length:Number($("quickSets").value)||2},()=>({weight:0,reps:Number($("quickReps").value)||12,done:false}))})}closeDialog("addWorkoutDialog");persist()};
+$("addWorkoutForm").onsubmit=e=>{e.preventDefault();const mode=document.querySelector('input[name="addMode"]:checked').value;if(mode==="plan"){const plan=planById($("availablePlansSelect").value);if(!plan)return alert("No plan items available.");if(!addPlanToWorkout(plan))return alert("All exercises from this plan are already in the workout.")}else{const ex=exById($("availableExercisesSelect").value);if(!ex)return alert("No exercise available.");const options=ex.category==="cardio"?{intervals:[...intervalDraft]}:{sets:Number($("quickSets").value)||1,reps:Number($("quickReps").value)||1};if(!addActivityToSession(ex,selectedDate,options))return alert("Exercise already added.")}closeDialog("addWorkoutDialog");persist()};
 $("addExerciseBtn").onclick=()=>openExercise();
 $("exercisePhoto").onchange=e=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;const file=e.target.files[0];if(file){exercisePhotoObjectUrl=URL.createObjectURL(file);showExercisePhotoPreview(exercisePhotoObjectUrl)}else{const current=exById($("exerciseId").value);showExercisePhotoPreview(current?.photo||"")}};
 $("removeExercisePhotoBtn").onclick=()=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=true;$("exercisePhoto").value="";showExercisePhotoPreview("")};
 $("confirmRemoveWorkoutItemBtn").onclick=()=>{if(!pendingWorkoutItemRemoval)return closeDialog("removeWorkoutItemDialog");const w=workoutFor(pendingWorkoutItemRemoval.date);if(w)w.items=w.items.filter(x=>x.id!==pendingWorkoutItemRemoval.itemId);pendingWorkoutItemRemoval=null;closeDialog("removeWorkoutItemDialog");persist()};
 document.addEventListener("click",()=>closeItemMenus());
-$("exerciseForm").onsubmit=async e=>{e.preventDefault();const id=$("exerciseId").value,name=$("exerciseName").value.trim();if(!name)return;const exact=state.exercises.some(x=>x.id!==id&&normalizeName(x.name)===normalizeName(name));if(exact)return alert("This exercise already exists.");const similar=similarName(name,id);if(similar&&!confirm(`A similar exercise already exists: ${similar.name}\n\nSave anyway?`))return;const old=id?exById(id):null;let photo=removeExercisePhotoRequested?"":(old?.photo||"");if($("exercisePhoto").files[0])photo=await fileToDataUrl($("exercisePhoto").files[0]);const record={id:id||crypto.randomUUID(),name,category:$("exerciseCategory").value,muscle:$("exerciseMuscle").value.trim(),photo,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};if(id)state.exercises[state.exercises.findIndex(x=>x.id===id)]=record;else state.exercises.push(record);clearExercisePhotoObjectUrl();closeDialog("exerciseDialog");persist()};
+$("exerciseForm").onsubmit=async e=>{e.preventDefault();const addAfterSave=e.submitter?.value==="save-add",id=$("exerciseId").value,name=$("exerciseName").value.trim();if(!name)return;const exact=state.exercises.some(x=>x.id!==id&&normalizeName(x.name)===normalizeName(name));if(exact)return alert("This exercise already exists.");const similar=similarName(name,id);if(similar&&!confirm(`A similar exercise already exists: ${similar.name}\n\nSave anyway?`))return;const old=id?exById(id):null;let photo=removeExercisePhotoRequested?"":(old?.photo||"");if($("exercisePhoto").files[0])photo=await fileToDataUrl($("exercisePhoto").files[0]);const record={id:id||uid(),name,category:$("exerciseCategory").value,muscle:$("exerciseMuscle").value.trim(),photo,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};if(id)state.exercises[state.exercises.findIndex(x=>x.id===id)]=record;else state.exercises.push(record);clearExercisePhotoObjectUrl();closeDialog("exerciseDialog");persist();if(addAfterSave)requestAnimationFrame(()=>openAddTo(exById(record.id)))};
+document.querySelectorAll('input[name="addToTarget"]').forEach(input=>input.onchange=updateAddToTarget);
+$("addToPlanSelect").onchange=updateAddToStatus;$("addToNewPlanName").oninput=updateAddToStatus;$("addToCardioIntervalBtn").onclick=()=>{addToIntervalDraft.push(addToIntervalDraft.at(-1)||10);renderAddToIntervals()};
+$("addToForm").onsubmit=e=>{e.preventDefault();const ex=exById($("addToExerciseId").value),target=selectedAddToTarget();if(!ex)return alert("Exercise not found.");const options=addToFormOptions(ex);if(target==="today"){if(!addActivityToSession(ex,todayKey(),options))return alert("Exercise already added to today’s workout.")}else if(target==="existing-plan"){const plan=planById($("addToPlanSelect").value);if(!plan)return alert("No available plan.");plan.items ||= [];if(plan.items.some(item=>item.exerciseId===ex.id))return alert("Exercise already added to this plan.");plan.items.push(createPlanItem(ex,options))}else{const name=$("addToNewPlanName").value.trim();if(!name)return alert("Enter a plan name.");state.plans.push({id:uid(),name,notes:"",items:[createPlanItem(ex,options)]})}closeDialog("addToDialog");persist()};
 $("librarySearch").oninput=renderLibrary;
 $("addPlanBtn").onclick=()=>openPlan();$("planCategorySelect").onchange=()=>{populatePlanExerciseOptions();updatePlanFields();intervalDraft=[10,10];renderPlanIntervals()};$("addPlanCardioIntervalBtn").onclick=()=>{intervalDraft.push(intervalDraft.at(-1)||10);renderPlanIntervals()};$("addPlanItemInlineBtn").onclick=addCurrentPlanItem;
-$("planForm").onsubmit=e=>{e.preventDefault();planDraft.name=$("planName").value.trim();planDraft.notes=$("planNotes").value.trim();if(!planDraft.name)return;planDraft.id=planDraft.id||crypto.randomUUID();const i=state.plans.findIndex(x=>x.id===planDraft.id);if(i>=0)state.plans[i]=structuredClone(planDraft);else state.plans.push(structuredClone(planDraft));closeDialog("planDialog");persist()};
+$("planForm").onsubmit=e=>{e.preventDefault();planDraft.name=$("planName").value.trim();planDraft.notes=$("planNotes").value.trim();if(!planDraft.name)return;planDraft.id=planDraft.id||uid();const i=state.plans.findIndex(x=>x.id===planDraft.id);if(i>=0)state.plans[i]=structuredClone(planDraft);else state.plans.push(structuredClone(planDraft));closeDialog("planDialog");persist()};
 $("exportBackupBtn").onclick=()=>downloadBackup(state);$("restoreBackupInput").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const restored=JSON.parse(await f.text());saveState(restored);state=loadState();renderAll();alert("Backup restored.")}catch{alert("Invalid backup file.")}};$("clearDataBtn").onclick=()=>{if(confirm("Clear all local data?")){state=makeDefaultState();saveState(state);selectedDate=todayKey();weekOffset=0;renderAll()}};
-if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
+if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
 renderAll();
