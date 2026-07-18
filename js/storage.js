@@ -17,13 +17,13 @@ export function makeDefaultState(){
     {id:uid(),name:"Bike",category:"cardio",muscle:"",photo:"",link:"",notes:"",archived:false},
     {id:uid(),name:"Hamstring Stretch",category:"flexibility",muscle:"Legs",photo:"",link:"",notes:"",archived:false}
   ];
-  return {version:"1.2",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+  return {version:"1.3",exercises,plans:[],workouts:{},metrics:{},settings:{}};
 }
 export function loadState(){
   try{
     const s=JSON.parse(localStorage.getItem(KEY));
     if(!s)return makeDefaultState();
-    s.version="1.2";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
+    s.version="1.3";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
     s.exercises.forEach(x=>{x.archived ??= false;x.photo ||= "";x.link ||= "";x.notes ||= "";});
     s.plans = s.plans.map(p=>({
       ...p,

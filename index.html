@@ -7,6 +7,7 @@
   <title>Fitness Record</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="css/app.css">
+  <link rel="preload" as="image" href="assets/teacher-weekly-template.png">
 </head>
 <body>
 <header class="topbar">
@@ -76,6 +77,11 @@
   <section id="settingsView" class="view">
     <div class="page-heading"><h2>Settings</h2></div>
     <article class="card">
+      <h3>Teacher PDF</h3>
+      <p class="muted">Fill the Canada Workout Program Weekly template with one week of workout records.</p>
+      <button id="openTeacherExportBtn" class="full">Export weekly PDF</button>
+    </article>
+    <article class="card">
       <h3>Data</h3>
       <button id="exportBackupBtn" class="full">Export backup</button>
       <label class="file-button secondary full">Restore backup<input id="restoreBackupInput" type="file" accept=".json,application/json"></label>
@@ -83,7 +89,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.2 — faster add-to flows and previous workout values.</p>
+      <p class="muted">Version 1.3 — Canada College weekly teacher PDF export.</p>
     </article>
   </section>
 </main>
@@ -242,6 +248,21 @@
   </form>
 </dialog>
 
+<dialog id="teacherExportDialog">
+  <form id="teacherExportForm">
+    <div class="dialog-title"><h3>Export weekly PDF</h3><button type="button" class="secondary icon-button" data-close="teacherExportDialog">×</button></div>
+    <label><span>Student</span><input id="teacherStudentName" autocomplete="name" required></label>
+    <label><span>Goals</span><textarea id="teacherGoals" placeholder="Weekly workout goals"></textarea></label>
+    <label><span>Week containing</span><div class="date-input-wrap"><input id="teacherWeekDate" type="date" required></div></label>
+    <p class="muted teacher-export-note">Only dates with workout records are included. Strength uses the last completed set weight. Completed Warm up and Flexibility exercises are marked X.</p>
+    <p id="teacherExportStatus" class="muted field-hint" aria-live="polite"></p>
+    <div class="dialog-actions">
+      <button type="button" class="secondary" data-close="teacherExportDialog">Cancel</button>
+      <button type="submit">Preview / Save PDF</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="referenceDialog">
   <div class="reference-dialog-content">
     <div class="dialog-title"><h3 id="referenceTitle">Reference</h3><button type="button" class="secondary icon-button" data-close="referenceDialog">×</button></div>
@@ -264,6 +285,8 @@
     </div>
   </div>
 </dialog>
+
+<section id="teacherPrintRoot" aria-hidden="true"></section>
 
 <script type="module" src="js/app.js"></script>
 </body>
