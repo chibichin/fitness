@@ -10,23 +10,32 @@ export function uid(){
 }
 export function makeDefaultState(){
   const exercises=[
-    {id:uid(),name:"Knee Hug",category:"warmup",muscle:"Legs",photo:"",link:"",notes:"",archived:false},
-    {id:uid(),name:"Hip Circle",category:"warmup",muscle:"Hips",photo:"",link:"",notes:"",archived:false},
-    {id:uid(),name:"Squat",category:"strength",muscle:"Legs",photo:"",link:"",notes:"",archived:false},
-    {id:uid(),name:"Bench Press",category:"strength",muscle:"Chest",photo:"",link:"",notes:"",archived:false},
-    {id:uid(),name:"Bike",category:"cardio",muscle:"",photo:"",link:"",notes:"",archived:false},
-    {id:uid(),name:"Hamstring Stretch",category:"flexibility",muscle:"Legs",photo:"",link:"",notes:"",archived:false}
+    {id:uid(),name:"Knee Hug",category:"warmup",primaryMuscles:["Hip flexors"],secondaryMuscles:["Glutes"],equipment:"Bodyweight",movementType:"Mobility",muscle:"Hip flexors",photo:"",link:"",notes:"",archived:false},
+    {id:uid(),name:"Hip Circle",category:"warmup",primaryMuscles:["Hips"],secondaryMuscles:["Glutes"],equipment:"Bodyweight",movementType:"Mobility",muscle:"Hips",photo:"",link:"",notes:"",archived:false},
+    {id:uid(),name:"Squat",category:"strength",primaryMuscles:["Quads","Glutes"],secondaryMuscles:["Hamstrings","Core"],equipment:"Barbell",movementType:"Squat",muscle:"Quads, Glutes",photo:"",link:"",notes:"",archived:false},
+    {id:uid(),name:"Bench Press",category:"strength",primaryMuscles:["Chest"],secondaryMuscles:["Triceps","Shoulders"],equipment:"Barbell",movementType:"Push",muscle:"Chest",photo:"",link:"",notes:"",archived:false},
+    {id:uid(),name:"Bike",category:"cardio",primaryMuscles:["Quads"],secondaryMuscles:["Glutes","Calves"],equipment:"Cardio machine",movementType:"Cardio",muscle:"Quads",photo:"",link:"",notes:"",archived:false},
+    {id:uid(),name:"Hamstring Stretch",category:"flexibility",primaryMuscles:["Hamstrings"],secondaryMuscles:["Calves"],equipment:"Bodyweight",movementType:"Mobility",muscle:"Hamstrings",photo:"",link:"",notes:"",archived:false}
   ];
-  return {version:"1.3.1",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+  return {version:"1.4",exercises,plans:[],workouts:{},metrics:{},settings:{}};
 }
 export function loadState(){
   try{
     const s=JSON.parse(localStorage.getItem(KEY));
     if(!s)return makeDefaultState();
-    s.version="1.3.1";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
-    s.exercises.forEach(x=>{x.archived ??= false;x.photo ||= "";x.link ||= "";x.notes ||= "";});
+    s.version="1.4";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
+    const splitMuscles=value=>Array.isArray(value)?value.filter(Boolean):String(value||"").split(/[,;/]+/).map(x=>x.trim()).filter(Boolean);
+    s.exercises.forEach(x=>{
+      x.archived ??= false;x.photo ||= "";x.link ||= "";x.notes ||= "";
+      x.primaryMuscles=splitMuscles(x.primaryMuscles?.length?x.primaryMuscles:x.muscle);
+      x.secondaryMuscles=splitMuscles(x.secondaryMuscles);
+      const primaryKeys=new Set(x.primaryMuscles.map(v=>v.toLowerCase()));
+      x.secondaryMuscles=x.secondaryMuscles.filter(v=>!primaryKeys.has(v.toLowerCase()));
+      x.equipment ||= "";x.movementType ||= "";x.muscle=x.primaryMuscles.join(", ");
+    });
     s.plans = s.plans.map(p=>({
       ...p,
+      intendedFocus:splitMuscles(p.intendedFocus),
       items:[...(p.warmupAdditions||[]),...(p.items||[])].map(i=>({...i,exerciseName:i.exerciseName||s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise"}))
     }));
     Object.values(s.workouts).forEach(w=>{

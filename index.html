@@ -49,6 +49,7 @@
         </div>
         <button id="openAddWorkoutBtn">Add</button>
       </div>
+      <div id="todayMuscleFocus" class="muscle-focus-summary hidden"></div>
       <div id="workoutSections"></div>
     </article>
   </section>
@@ -88,7 +89,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.3.1 — Canada College weekly teacher spreadsheet export.</p>
+      <p class="muted">Version 1.4 — Muscle tracking, automatic Today/Plan focus, and teacher spreadsheet export.</p>
     </article>
   </section>
 </main>
@@ -148,7 +149,32 @@
         <option value="flexibility">Flexibility</option>
       </select>
     </label>
-    <label><span>Muscle group</span><input id="exerciseMuscle"></label>
+    <fieldset class="choice-fieldset">
+      <legend>Primary muscles</legend>
+      <p class="muted field-help">The main muscles this exercise is designed to train.</p>
+      <div id="exercisePrimaryMuscles" class="choice-grid"></div>
+      <label><span>Other primary muscles</span><input id="exercisePrimaryCustom" placeholder="Separate names with commas"></label>
+    </fieldset>
+    <fieldset class="choice-fieldset">
+      <legend>Secondary muscles</legend>
+      <p class="muted field-help">Muscles that assist or stabilize the movement.</p>
+      <div id="exerciseSecondaryMuscles" class="choice-grid"></div>
+      <label><span>Other secondary muscles</span><input id="exerciseSecondaryCustom" placeholder="Separate names with commas"></label>
+    </fieldset>
+    <div class="two-col">
+      <label><span>Equipment</span>
+        <select id="exerciseEquipment">
+          <option value="">Not specified</option>
+          <option>Bodyweight</option><option>Dumbbell</option><option>Barbell</option><option>Machine</option><option>Cable</option><option>Kettlebell</option><option>Resistance band</option><option>Cardio machine</option><option>Other</option>
+        </select>
+      </label>
+      <label><span>Movement type</span>
+        <select id="exerciseMovementType">
+          <option value="">Not specified</option>
+          <option>Push</option><option>Pull</option><option>Squat</option><option>Hinge</option><option>Lunge</option><option>Carry</option><option>Rotation</option><option>Isolation</option><option>Mobility</option><option>Cardio</option><option>Other</option>
+        </select>
+      </label>
+    </div>
     <label><span>Reference photo</span><input id="exercisePhoto" type="file" accept="image/*"></label>
     <div id="exercisePhotoPreviewWrap" class="photo-preview-wrap hidden">
       <img id="exercisePhotoPreview" class="exercise-photo-preview" alt="Current exercise reference">
@@ -215,6 +241,13 @@
     <input id="planId" type="hidden">
     <label><span>Plan name</span><input id="planName" required></label>
     <label><span>Notes</span><textarea id="planNotes"></textarea></label>
+    <fieldset class="choice-fieldset">
+      <legend>Intended focus <span class="optional-label">optional</span></legend>
+      <p class="muted field-help">Choose what this plan is meant to emphasize. Calculated involvement updates automatically from its exercises.</p>
+      <div id="planIntendedFocus" class="choice-grid"></div>
+      <label><span>Other intended focus</span><input id="planIntendedFocusCustom" placeholder="Separate names with commas"></label>
+    </fieldset>
+    <div id="planCalculatedFocus" class="muscle-focus-summary compact hidden"></div>
 
     <div class="section-head"><h3>Plan items</h3></div>
     <label><span>Category</span>
@@ -266,6 +299,7 @@
   <div class="reference-dialog-content">
     <div class="dialog-title"><h3 id="referenceTitle">Reference</h3><button type="button" class="secondary icon-button" data-close="referenceDialog">×</button></div>
     <img id="referenceImage" class="reference-dialog-image hidden" alt="Exercise reference">
+    <div id="referenceMuscleMeta" class="reference-muscle-meta hidden"></div>
     <div id="referenceNotes" class="reference-notes hidden"></div>
     <a id="referenceLink" class="reference-link-button hidden" target="_blank" rel="noopener">Open external link</a>
     <p id="referenceEmpty" class="muted hidden">No reference saved.</p>
