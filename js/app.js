@@ -1,4 +1,5 @@
 import {loadState,saveState,makeDefaultState,downloadBackup,uid} from "./storage.js";
+import {downloadTeacherWorkbook} from "./xlsx.js";
 
 let state=loadState();
 let selectedDate=todayKey();
@@ -340,15 +341,8 @@ function renderProgress(){
 }
 
 
-// Teacher weekly PDF export. The original PDF page is printed as an image,
-// with workout values positioned over the teacher's fixed grid.
-const teacherGrid={
-  pageWidth:792,pageHeight:612,
-  nameLeft:50.4,nameWidth:146.4,
-  detailLeft:196.8,detailWidth:45.12,
-  dateLeft:241.92,dateWidth:55.2,dateSlots:9,
-  rowLines:[123.84,136.8,149.28,162.24,175.2,188.16,200.64,213.6,226.56,239.52,252,264.96,277.92,290.88,303.36,316.32,329.28,342.24,354.72,367.68,380.64,393.6,406.08,419.04,432,444.96,457.44,470.4,483.36,496.32,508.8,521.76,534.72,547.68]
-};
+// Teacher weekly spreadsheet export. The workbook keeps the teacher's
+// exercise / sets-reps / date-column arrangement and landscape Letter setup.
 function dateFromKey(key){return new Date(`${key}T12:00:00`)}
 function teacherWeekKeys(containingDate){
   const base=dateFromKey(containingDate),start=new Date(base);start.setDate(base.getDate()-base.getDay());
@@ -382,8 +376,7 @@ function teacherExportWeight(item){
   const sets=[...(item?.sets||[])].reverse();
   const completed=sets.find(set=>set.done&&Number(set.weight)>0);
   const recorded=sets.find(set=>Number(set.weight)>0);
-  const value=Number((completed||recorded)?.weight)||0;
-  return value?`${value}`:"";
+  return Number((completed||recorded)?.weight)||"";
 }
 function teacherCompletedMark(item){return item&&isDone(item)?"X":""}
 function teacherCardioForDate(date){
@@ -397,67 +390,35 @@ function teacherCardioForDate(date){
   const hrText=intervals.map(interval=>String(interval.targetHr||"").trim()).filter(Boolean);
   const numbers=hrText.flatMap(value=>value.match(/\d+(?:\.\d+)?/g)||[]).map(Number).filter(Number.isFinite);
   let heartRate="";
-  if(numbers.length){const low=Math.min(...numbers),high=Math.max(...numbers);heartRate=low===high?`${low}`:`${low}-${high}`}
+  if(numbers.length){const low=Math.min(...numbers),high=Math.max(...numbers);heartRate=low===high?low:`${low}-${high}`}
   else heartRate=[...new Set(hrText)].join("/");
-  return {name:items.map(item=>exById(item.exerciseId)?.name||item.exerciseName||"Cardio").join("/"),minutes:minutes?`${minutes}`:"",heartRate};
+  return {name:items.map(item=>exById(item.exerciseId)?.name||item.exerciseName||"Cardio").join("/"),minutes:minutes||"",heartRate};
 }
-function teacherCell(page,text,left,top,width,height,className=""){
-  const cell=document.createElement("div");
-  cell.className=`teacher-print-text ${className}`.trim();
-  cell.textContent=String(text??"");
-  Object.assign(cell.style,{left:`${left}pt`,top:`${top}pt`,width:`${width}pt`,height:`${height}pt`});
-  page.appendChild(cell);return cell;
-}
-function teacherRowTop(index){return teacherGrid.rowLines[index]}
-function teacherRowHeight(index){return teacherGrid.rowLines[index+1]-teacherGrid.rowLines[index]}
 function teacherDateLabel(key){const date=dateFromKey(key);return `${date.getMonth()+1}/${date.getDate()}`}
-function buildTeacherPrintPages({student,goals,containingDate}){
-  const dates=teacherWorkoutDates(containingDate),root=$("teacherPrintRoot");root.innerHTML="";
-  if(!dates.length)return {dates:[],pages:0};
+function teacherReportRow(row,dates,valueForDate){
+  return {name:row.name,detail:teacherSetsReps(row.latest),values:dates.map(date=>valueForDate(row.byDate[date]))};
+}
+function buildTeacherSpreadsheetReport({student,goals,containingDate}){
+  const dates=teacherWorkoutDates(containingDate),week=teacherWeekKeys(containingDate);
+  if(!dates.length)return {dates:[],pages:[]};
   const warm=teacherRows(dates,"warmup"),strength=teacherRows(dates,"strength"),flexibility=teacherRows(dates,"flexibility");
   const capacities={warmup:11,strength:12,flexibility:3};
   const pageCount=Math.max(1,Math.ceil(warm.length/capacities.warmup),Math.ceil(strength.length/capacities.strength),Math.ceil(flexibility.length/capacities.flexibility));
-  for(let pageIndex=0;pageIndex<pageCount;pageIndex++){
-    const page=document.createElement("article");page.className="teacher-page";page.dataset.page=String(pageIndex+1);
-    const image=document.createElement("img");image.className="teacher-template-image";image.src="assets/teacher-weekly-template.png";image.alt="";page.appendChild(image);
-    teacherCell(page,student,91,86,330,12,"teacher-student");
-    teacherCell(page,goals,81,99,600,12,"teacher-goals");
-    if(pageCount>1)teacherCell(page,`Page ${pageIndex+1} of ${pageCount}`,670,99,70,10,"teacher-page-count");
-    dates.slice(0,teacherGrid.dateSlots).forEach((date,index)=>teacherCell(page,teacherDateLabel(date),teacherGrid.dateLeft+index*teacherGrid.dateWidth,teacherRowTop(0),teacherGrid.dateWidth,teacherRowHeight(0),"teacher-date-cell"));
-
-    warm.slice(pageIndex*capacities.warmup,(pageIndex+1)*capacities.warmup).forEach((row,index)=>{
-      const rowIndex=1+index,top=teacherRowTop(rowIndex),height=teacherRowHeight(rowIndex);
-      teacherCell(page,row.name,teacherGrid.nameLeft,top,teacherGrid.nameWidth,height,"teacher-name-cell");
-      teacherCell(page,teacherSetsReps(row.latest),teacherGrid.detailLeft,top,teacherGrid.detailWidth,height,"teacher-center-cell");
-      dates.forEach((date,dateIndex)=>teacherCell(page,teacherCompletedMark(row.byDate[date]),teacherGrid.dateLeft+dateIndex*teacherGrid.dateWidth,top,teacherGrid.dateWidth,height,"teacher-center-cell teacher-mark-cell"));
-    });
-
-    strength.slice(pageIndex*capacities.strength,(pageIndex+1)*capacities.strength).forEach((row,index)=>{
-      const rowIndex=13+index,top=teacherRowTop(rowIndex),height=teacherRowHeight(rowIndex);
-      teacherCell(page,row.name,teacherGrid.nameLeft,top,teacherGrid.nameWidth,height,"teacher-name-cell");
-      teacherCell(page,teacherSetsReps(row.latest),teacherGrid.detailLeft,top,teacherGrid.detailWidth,height,"teacher-center-cell");
-      dates.forEach((date,dateIndex)=>teacherCell(page,teacherExportWeight(row.byDate[date]),teacherGrid.dateLeft+dateIndex*teacherGrid.dateWidth,top,teacherGrid.dateWidth,height,"teacher-center-cell"));
-    });
-
-    if(pageIndex===0){
-      dates.forEach((date,dateIndex)=>{
-        const cardio=teacherCardioForDate(date),left=teacherGrid.dateLeft+dateIndex*teacherGrid.dateWidth;
-        teacherCell(page,cardio.name,left,teacherRowTop(25),teacherGrid.dateWidth,teacherRowHeight(25),"teacher-cardio-name");
-        teacherCell(page,cardio.heartRate,left,teacherRowTop(26),teacherGrid.dateWidth,teacherRowHeight(26),"teacher-center-cell");
-        teacherCell(page,cardio.minutes,left,teacherRowTop(27),teacherGrid.dateWidth,teacherRowHeight(27),"teacher-center-cell");
-      });
-      teacherCell(page,"Duration (min)",teacherGrid.nameLeft,teacherRowTop(27),teacherGrid.nameWidth,teacherRowHeight(27),"teacher-name-cell teacher-small-label");
-    }
-
-    flexibility.slice(pageIndex*capacities.flexibility,(pageIndex+1)*capacities.flexibility).forEach((row,index)=>{
-      const rowIndex=30+index,top=teacherRowTop(rowIndex),height=teacherRowHeight(rowIndex);
-      teacherCell(page,row.name,teacherGrid.nameLeft,top,teacherGrid.nameWidth,height,"teacher-name-cell");
-      teacherCell(page,teacherSetsReps(row.latest),teacherGrid.detailLeft,top,teacherGrid.detailWidth,height,"teacher-center-cell");
-      dates.forEach((date,dateIndex)=>teacherCell(page,teacherCompletedMark(row.byDate[date]),teacherGrid.dateLeft+dateIndex*teacherGrid.dateWidth,top,teacherGrid.dateWidth,height,"teacher-center-cell teacher-mark-cell"));
-    });
-    root.appendChild(page);
-  }
-  return {dates,pages:pageCount};
+  const cardioByDate=dates.map(teacherCardioForDate);
+  const pages=Array.from({length:pageCount},(_,pageIndex)=>({
+    warmup:warm.slice(pageIndex*capacities.warmup,(pageIndex+1)*capacities.warmup).map(row=>teacherReportRow(row,dates,teacherCompletedMark)),
+    strength:strength.slice(pageIndex*capacities.strength,(pageIndex+1)*capacities.strength).map(row=>teacherReportRow(row,dates,teacherExportWeight)),
+    cardio:pageIndex===0?{
+      names:cardioByDate.map(item=>item.name),
+      heartRates:cardioByDate.map(item=>item.heartRate),
+      minutes:cardioByDate.map(item=>item.minutes)
+    }:{names:[],heartRates:[],minutes:[]},
+    flexibility:flexibility.slice(pageIndex*capacities.flexibility,(pageIndex+1)*capacities.flexibility).map(row=>teacherReportRow(row,dates,teacherCompletedMark))
+  }));
+  return {
+    student,goals,weekStart:week[0],weekLabel:`${teacherDateLabel(week[0])} - ${teacherDateLabel(week[6])}`,
+    dates:dates.map(key=>({key,label:teacherDateLabel(key)})),pages
+  };
 }
 function updateTeacherExportStatus(){
   const key=$("teacherWeekDate").value||selectedDate,dates=teacherWorkoutDates(key),status=$("teacherExportStatus");
@@ -467,10 +428,6 @@ function openTeacherExport(){
   const saved=state.settings.teacherExport||{};
   $("teacherStudentName").value=saved.student||"";$("teacherGoals").value=saved.goals||"";$("teacherWeekDate").value=selectedDate;
   updateTeacherExportStatus();showDialog("teacherExportDialog");
-}
-async function waitForTeacherTemplate(){
-  const images=[...$("teacherPrintRoot").querySelectorAll("img")];
-  await Promise.all(images.map(image=>image.complete&&image.naturalWidth?Promise.resolve():new Promise(resolve=>{image.addEventListener("load",resolve,{once:true});image.addEventListener("error",resolve,{once:true})})));
 }
 
 function renderAll(){renderHeader();renderWeek();renderWorkout();renderPlans();renderLibrary();renderProgress()}
@@ -574,16 +531,19 @@ $("addPlanBtn").onclick=()=>openPlan();$("planCategorySelect").onchange=()=>{pop
 $("planForm").onsubmit=e=>{e.preventDefault();planDraft.name=$("planName").value.trim();planDraft.notes=$("planNotes").value.trim();if(!planDraft.name)return;planDraft.id=planDraft.id||uid();const i=state.plans.findIndex(x=>x.id===planDraft.id);if(i>=0)state.plans[i]=structuredClone(planDraft);else state.plans.push(structuredClone(planDraft));closeDialog("planDialog");persist()};
 $("openTeacherExportBtn").onclick=openTeacherExport;
 $("teacherWeekDate").onchange=updateTeacherExportStatus;
-$("teacherExportForm").onsubmit=async event=>{
+$("teacherExportForm").onsubmit=event=>{
   event.preventDefault();
   const student=$("teacherStudentName").value.trim(),goals=$("teacherGoals").value.trim(),containingDate=$("teacherWeekDate").value;
-  const result=buildTeacherPrintPages({student,goals,containingDate});
-  if(!result.dates.length){updateTeacherExportStatus();return}
+  const report=buildTeacherSpreadsheetReport({student,goals,containingDate});
+  if(!report.dates.length){updateTeacherExportStatus();return}
   state.settings.teacherExport={student,goals};saveState(state);
-  $("teacherExportStatus").textContent="Preparing print preview…";
-  await waitForTeacherTemplate();
-  closeDialog("teacherExportDialog");
-  requestAnimationFrame(()=>setTimeout(()=>window.print(),80));
+  try{
+    const result=downloadTeacherWorkbook(report);
+    $("teacherExportStatus").textContent=`Downloaded ${result.filename}.`;
+    setTimeout(()=>closeDialog("teacherExportDialog"),350);
+  }catch(error){
+    console.error(error);$("teacherExportStatus").textContent="Spreadsheet export failed. Please try again.";
+  }
 };
 $("exportBackupBtn").onclick=()=>downloadBackup(state);$("restoreBackupInput").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const restored=JSON.parse(await f.text());saveState(restored);state=loadState();renderAll();alert("Backup restored.")}catch{alert("Invalid backup file.")}};$("clearDataBtn").onclick=()=>{if(confirm("Clear all local data?")){state=makeDefaultState();saveState(state);selectedDate=todayKey();weekOffset=0;renderAll()}};
 if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
