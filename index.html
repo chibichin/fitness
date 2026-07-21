@@ -89,7 +89,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.4 — Muscle tracking, automatic Today/Plan focus, and teacher spreadsheet export.</p>
+      <p class="muted">Version 1.4.1 — Faster workout building, set steppers, muscle tracking, and teacher spreadsheet export.</p>
     </article>
   </section>
 </main>
@@ -102,36 +102,35 @@
   <button data-view="settingsView">Settings</button>
 </nav>
 
-<dialog id="addWorkoutDialog">
+<dialog id="addWorkoutDialog" class="wide-dialog">
   <form id="addWorkoutForm">
     <div class="dialog-title"><h3>Add to workout</h3><button type="button" class="secondary icon-button" data-close="addWorkoutDialog">×</button></div>
 
-    <label class="radio-card">
-      <input type="radio" name="addMode" value="plan" checked>
-      <span><b>Plan</b><small>Add a saved plan</small></span>
-    </label>
-    <div id="addPlanPanel"><select id="availablePlansSelect"></select></div>
-
-    <label class="radio-card">
-      <input type="radio" name="addMode" value="exercise">
-      <span><b>Exercise</b><small>Add one exercise from your Library</small></span>
-    </label>
-    <div id="addExercisePanel" class="hidden">
-      <select id="availableExercisesSelect"></select>
-      <div id="strengthQuickFields" class="two-col">
-        <label><span>Sets</span><input id="quickSets" type="number" min="1" value="2"></label>
-        <label><span>Reps / seconds</span><input id="quickReps" type="number" min="1" value="12"></label>
-      </div>
-      <p id="quickPreviousWeightHint" class="muted field-hint hidden"></p>
-      <div id="cardioQuickFields" class="hidden">
-        <div id="quickCardioIntervals"></div>
-        <button id="addQuickCardioIntervalBtn" type="button" class="secondary full">Add minutes</button>
-      </div>
+    <div class="segmented-tabs" role="tablist" aria-label="Add workout source">
+      <label><input type="radio" name="addMode" value="plan" checked><span>Plans</span></label>
+      <label><input type="radio" name="addMode" value="exercise"><span>Exercises</span></label>
     </div>
+
+    <div id="addPlanPanel">
+      <p class="muted add-workout-help">Choose a plan, then select the available exercises you want to add.</p>
+      <div id="availablePlansList" class="selection-list plan-selection-list"></div>
+      <div id="availablePlanExercises" class="selection-list"></div>
+    </div>
+
+    <div id="addExercisePanel" class="hidden">
+      <label><span>Search exercises</span><input id="addWorkoutExerciseSearch" type="search" placeholder="Name, muscle, equipment..."></label>
+      <div class="selection-toolbar">
+        <span id="exerciseAvailabilityText" class="muted"></span>
+        <button id="selectAllExercisesBtn" type="button" class="secondary compact-button">Select all</button>
+      </div>
+      <div id="availableExercisesList" class="selection-list"></div>
+    </div>
+
+    <p id="addWorkoutSelectionStatus" class="muted field-hint" aria-live="polite"></p>
 
     <div class="dialog-actions">
       <button type="button" class="secondary" data-close="addWorkoutDialog">Cancel</button>
-      <button type="submit">Add</button>
+      <button id="confirmAddWorkoutBtn" type="submit" disabled>Add 0 Exercises</button>
     </div>
   </form>
 </dialog>
@@ -241,12 +240,7 @@
     <input id="planId" type="hidden">
     <label><span>Plan name</span><input id="planName" required></label>
     <label><span>Notes</span><textarea id="planNotes"></textarea></label>
-    <fieldset class="choice-fieldset">
-      <legend>Intended focus <span class="optional-label">optional</span></legend>
-      <p class="muted field-help">Choose what this plan is meant to emphasize. Calculated involvement updates automatically from its exercises.</p>
-      <div id="planIntendedFocus" class="choice-grid"></div>
-      <label><span>Other intended focus</span><input id="planIntendedFocusCustom" placeholder="Separate names with commas"></label>
-    </fieldset>
+    <p class="muted field-help">Muscle involvement is calculated automatically from the exercises in this plan.</p>
     <div id="planCalculatedFocus" class="muscle-focus-summary compact hidden"></div>
 
     <div class="section-head"><h3>Plan items</h3></div>

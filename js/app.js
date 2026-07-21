@@ -10,6 +10,9 @@ let addToIntervalDraft=[10,10];
 let pendingWorkoutItemRemoval=null;
 let exercisePhotoObjectUrl="";
 let removeExercisePhotoRequested=false;
+let addWorkoutPlanId="";
+let addWorkoutPlanSelection=new Set();
+let addWorkoutExerciseSelection=new Set();
 
 const $=id=>document.getElementById(id);
 const sections=["warmup","strength","cardio","flexibility"];
@@ -166,9 +169,7 @@ function renderTodayMuscleFocus(w){
   const host=$("todayMuscleFocus");
   if(!w?.items?.length){host.innerHTML="";host.classList.add("hidden");return}
   const summary=calculateMuscleFocus(exercisesFromItems(w.items));
-  const planIds=uniqueList(w.items.map(item=>item.sourcePlanId).filter(Boolean));
-  const intended=uniqueList(planIds.flatMap(id=>planById(id)?.intendedFocus||[]));
-  const html=focusSummaryHtml({intended,main:summary.main,also:summary.also});
+  const html=focusSummaryHtml({main:summary.main,also:summary.also});
   host.innerHTML=html;host.classList.toggle("hidden",!html);
 }
 function renderWorkout(){
@@ -203,11 +204,18 @@ function openRemoveWorkoutItem(item){
 }
 function renderWorkoutItem(item){
   const ex=exById(item.exerciseId),displayName=ex?.name||item.exerciseName||"Exercise",card=document.createElement("div");card.className="workout-item"+(isDone(item)?" completed":"");
-  card.innerHTML=`<div class="item-head"><div><strong>${displayName}</strong><div class="muted">${labels[itemCategory(item)]}</div></div><div class="item-actions"><button class="secondary reference" type="button">Ref</button><button class="secondary more" type="button" aria-label="Exercise actions" aria-expanded="false">⋯</button></div></div><div class="item-menu hidden"><button class="danger remove-exercise-action" type="button">Remove exercise</button></div><div class="item-body"></div>`;
+  const setActions=item.type==="cardio"?"":'<button class="secondary add-set-action" type="button">Add set</button><button class="secondary remove-set-action" type="button">Remove last set</button>';
+  card.innerHTML=`<div class="item-head"><div><strong>${escapeHtml(displayName)}</strong><div class="muted">${labels[itemCategory(item)]}</div></div><div class="item-actions"><button class="secondary reference" type="button">Ref</button><button class="secondary more" type="button" aria-label="Exercise actions" aria-expanded="false">⋯</button></div></div><div class="item-menu hidden">${setActions}<button class="danger remove-exercise-action" type="button">Remove exercise</button></div><div class="item-body"></div>`;
   const menu=card.querySelector(".item-menu"),more=card.querySelector(".more");
   more.onclick=e=>{e.stopPropagation();const willOpen=menu.classList.contains("hidden");closeItemMenus(menu);menu.classList.toggle("hidden",!willOpen);more.setAttribute("aria-expanded",String(willOpen))};
   menu.onclick=e=>e.stopPropagation();
   card.querySelector(".remove-exercise-action").onclick=()=>{closeItemMenus();openRemoveWorkoutItem(item)};
+  const addSetButton=card.querySelector(".add-set-action"),removeSetButton=card.querySelector(".remove-set-action");
+  if(addSetButton){
+    removeSetButton.disabled=(item.sets||[]).length<=1;
+    addSetButton.onclick=()=>{const last=item.sets.at(-1)||{weight:0,reps:12};item.sets.push({weight:last.weight,reps:last.reps,done:false});closeItemMenus();persist()};
+    removeSetButton.onclick=()=>{if(item.sets.length>1){item.sets.pop();closeItemMenus();persist()}};
+  }
   card.querySelector(".reference").onclick=()=>showReference(ex);
   const body=card.querySelector(".item-body");
   if(item.type==="cardio"){
@@ -228,18 +236,17 @@ function renderWorkoutItem(item){
     body.appendChild(controls);
   }else{
     item.sets.forEach(set=>{
-      const row=document.createElement("div");row.className="set-row";
-      row.innerHTML=`<div class="unit-input"><input type="number" min="0" value="${set.reps||0}" aria-label="Reps"><b>reps</b></div><div class="unit-input"><input type="number" min="0" step="0.5" value="${set.weight||0}" aria-label="Weight"><b>lb</b></div><button class="${set.done?"":"secondary"}">${set.done?"✓":"○"}</button>`;
-      row.children[0].querySelector("input").onchange=e=>{set.reps=Number(e.target.value)||0;saveState(state)};
-      row.children[1].querySelector("input").onchange=e=>{set.weight=Number(e.target.value)||0;saveState(state)};
-      row.children[2].onclick=()=>{set.done=!set.done;persist()};
+      const row=document.createElement("div");row.className="set-row strength-set-row";
+      row.innerHTML=`<div class="stepper-field"><span>Reps</span><div class="number-stepper"><button type="button" class="secondary reps-minus" aria-label="Decrease reps by 2">−</button><input type="number" min="0" step="1" value="${set.reps||0}" aria-label="Reps"><button type="button" class="secondary reps-plus" aria-label="Increase reps by 2">＋</button></div></div><div class="stepper-field"><span>Weight (lb)</span><div class="number-stepper"><button type="button" class="secondary weight-minus" aria-label="Decrease weight by 2.5 pounds">−</button><input type="number" min="0" step="0.5" value="${set.weight||0}" aria-label="Weight"><button type="button" class="secondary weight-plus" aria-label="Increase weight by 2.5 pounds">＋</button></div></div><button class="${set.done?"":"secondary"} set-done" aria-label="Mark set ${set.done?"not done":"done"}">${set.done?"✓":"○"}</button>`;
+      const repsInput=row.querySelector('input[aria-label="Reps"]'),weightInput=row.querySelector('input[aria-label="Weight"]');
+      const adjust=(key,delta,input)=>{const next=Math.max(0,Math.round(((Number(set[key])||0)+delta)*100)/100);set[key]=next;input.value=String(next);saveState(state)};
+      repsInput.onchange=e=>{set.reps=Math.max(0,Number(e.target.value)||0);e.target.value=String(set.reps);saveState(state)};
+      weightInput.onchange=e=>{set.weight=Math.max(0,Number(e.target.value)||0);e.target.value=String(set.weight);saveState(state)};
+      row.querySelector(".reps-minus").onclick=()=>adjust("reps",-2,repsInput);row.querySelector(".reps-plus").onclick=()=>adjust("reps",2,repsInput);
+      row.querySelector(".weight-minus").onclick=()=>adjust("weight",-2.5,weightInput);row.querySelector(".weight-plus").onclick=()=>adjust("weight",2.5,weightInput);
+      row.querySelector(".set-done").onclick=()=>{set.done=!set.done;persist()};
       body.appendChild(row);
     });
-    const controls=document.createElement("div");controls.className="set-controls";
-    controls.innerHTML='<button class="secondary">− Set</button><button>＋ Set</button>';
-    controls.children[0].onclick=()=>{if(item.sets.length>1){item.sets.pop();persist()}};
-    controls.children[1].onclick=()=>{const last=item.sets.at(-1)||{weight:0,reps:12};item.sets.push({weight:last.weight,reps:last.reps,done:false});persist()};
-    body.appendChild(controls);
   }
   return card;
 }
@@ -257,9 +264,9 @@ function renderPlans(){
   const host=$("plansList");
   if(!state.plans.length){host.innerHTML='<article class="card"><p class="muted">No plans yet.</p></article>';return}
   host.innerHTML=state.plans.map(p=>{
-    const names=(p.items||[]).map(x=>exById(x.exerciseId)?.name||x.exerciseName||"Exercise"),summary=calculateMuscleFocus(exercisesFromItems(p.items));
-    const focus=focusSummaryHtml({intended:p.intendedFocus||[],main:summary.main,also:summary.also});
-    return `<article class="list-card"><strong>${escapeHtml(p.name)}</strong>${p.notes?`<p class="muted">${escapeHtml(p.notes)}</p>`:""}<p>${escapeHtml(names.join(", ")||"No items")}</p>${focus?`<div class="plan-focus-inline">${focus}</div>`:""}<div class="actions"><button class="secondary edit-plan" data-id="${p.id}">Edit</button><button class="secondary duplicate-plan" data-id="${p.id}">Duplicate</button><button class="danger delete-plan" data-id="${p.id}">Delete</button></div></article>`;
+    const count=(p.items||[]).length,summary=calculateMuscleFocus(exercisesFromItems(p.items));
+    const focus=focusSummaryHtml({main:summary.main,also:summary.also});
+    return `<article class="list-card"><strong>${escapeHtml(p.name)}</strong>${p.notes?`<p class="muted plan-notes">${escapeHtml(p.notes)}</p>`:'<p class="muted plan-notes">No notes</p>'}${focus?`<div class="plan-focus-inline">${focus}</div>`:'<p class="muted">No muscle details</p>'}<p class="plan-exercise-count">${count} exercise${count===1?"":"s"}</p><div class="actions"><button class="secondary edit-plan" data-id="${p.id}">Edit</button><button class="secondary duplicate-plan" data-id="${p.id}">Duplicate</button><button class="danger delete-plan" data-id="${p.id}">Delete</button></div></article>`;
   }).join("");
   host.querySelectorAll(".edit-plan").forEach(b=>b.onclick=()=>openPlan(state.plans.find(x=>x.id===b.dataset.id)));
   host.querySelectorAll(".duplicate-plan").forEach(b=>b.onclick=()=>{const p=structuredClone(state.plans.find(x=>x.id===b.dataset.id));p.id=uid();p.name+=" Copy";state.plans.push(p);persist()});
@@ -269,7 +276,6 @@ function openPlan(plan=null){
   planDraft=plan?structuredClone(plan):{id:"",name:"",notes:"",intendedFocus:[],items:[]};
   planDraft.items ||= [];planDraft.intendedFocus ||= [];
   $("planDialogTitle").textContent=plan?"Edit plan":"Add plan";$("planId").value=planDraft.id;$("planName").value=planDraft.name;$("planNotes").value=planDraft.notes;
-  setChoiceValues("planIntendedFocus","planIntendedFocusCustom",planDraft.intendedFocus);
   $("planCategorySelect").value="warmup";intervalDraft=[10,10];populatePlanExerciseOptions();updatePlanFields();renderPlanIntervals();renderPlanDraft();showDialog("planDialog");
 }
 function populatePlanExerciseOptions(){
@@ -289,7 +295,7 @@ function renderPlanIntervals(){
 }
 function renderPlanCalculatedFocus(){
   const host=$("planCalculatedFocus"),summary=calculateMuscleFocus(exercisesFromItems(planDraft?.items||[]));
-  const intended=readChoiceValues("planIntendedFocus","planIntendedFocusCustom"),html=focusSummaryHtml({intended,main:summary.main,also:summary.also});
+  const html=focusSummaryHtml({main:summary.main,also:summary.also});
   host.innerHTML=html;host.classList.toggle("hidden",!html);
 }
 function renderPlanDraft(){
@@ -310,8 +316,8 @@ function addCurrentPlanItem(){
   const options=ex.category==="cardio"?{intervals:[...intervalDraft]}:{sets:Number($("planSets").value)||1,reps:Number($("planReps").value)||1};
   planDraft.items.push(createPlanItem(ex,options));intervalDraft=[10,10];renderPlanDraft();populatePlanExerciseOptions();renderPlanIntervals();
 }
-function addPlanToWorkout(plan){
-  const w=workoutFor(selectedDate,true),used=new Set(w.items.map(x=>x.exerciseId)),source=(plan.items||[]).filter(x=>!used.has(x.exerciseId));
+function addPlanToWorkout(plan,selectedItemIds=null){
+  const w=workoutFor(selectedDate,true),used=new Set(w.items.map(x=>x.exerciseId)),source=(plan.items||[]).filter(x=>!used.has(x.exerciseId)&&(!selectedItemIds||selectedItemIds.has(x.id)));
   for(const item of source){
     const ex=exById(item.exerciseId)||{id:item.exerciseId,name:item.exerciseName||"Exercise",category:item.category||"strength"};
     const options=item.type==="cardio"?{intervals:item.intervals||[10]}:{sets:item.sets||1,reps:item.reps||1};
@@ -515,51 +521,60 @@ function openExercise(ex=null){
   setChoiceValues("exercisePrimaryMuscles","exercisePrimaryCustom",exercisePrimaryMuscles(ex));setChoiceValues("exerciseSecondaryMuscles","exerciseSecondaryCustom",exerciseSecondaryMuscles(ex));
   $("exerciseEquipment").value=ex?.equipment||"";$("exerciseMovementType").value=ex?.movementType||"";$("exerciseLink").value=ex?.link||"";$("exerciseNotes").value=ex?.notes||"";$("exercisePhoto").value="";showExercisePhotoPreview(ex?.photo||"");showDialog("exerciseDialog");
 }
-function populateAddWorkout(){
-  const w=workoutFor(selectedDate,true),used=new Set(w.items.map(x=>x.exerciseId)),planSelect=$("availablePlansSelect");
-  planSelect.innerHTML="";let firstPlan=null;
-  for(const plan of state.plans){
-    const total=(plan.items||[]).length,missing=(plan.items||[]).filter(item=>!used.has(item.exerciseId)).length,option=document.createElement("option");
-    option.value=plan.id;
-    if(!total){option.textContent=`${plan.name} — Empty`;option.disabled=true}
-    else if(missing===0){option.textContent=`✓ ${plan.name} — Added`;option.disabled=true}
-    else if(missing<total){option.textContent=`${plan.name} — ${missing} missing`;firstPlan ||= option}
-    else{option.textContent=plan.name;firstPlan ||= option}
-    planSelect.appendChild(option);
-  }
-  if(!state.plans.length){planSelect.innerHTML='<option value="">No saved plans</option>'}
-  else if(!firstPlan){const option=document.createElement("option");option.value="";option.textContent="No plan items to add";option.disabled=true;option.selected=true;planSelect.prepend(option)}
-  else firstPlan.selected=true;
-
-  const exerciseSelect=$("availableExercisesSelect");exerciseSelect.innerHTML="";let firstExercise=null,totalExercises=0;
+function workoutUsedExerciseIds(){return new Set((workoutFor(selectedDate)?.items||[]).map(item=>item.exerciseId))}
+function availablePlanItems(plan,used=workoutUsedExerciseIds()){return (plan?.items||[]).filter(item=>!used.has(item.exerciseId))}
+function availableLibraryExercises(){const used=workoutUsedExerciseIds();return state.exercises.filter(ex=>!ex.archived&&!used.has(ex.id))}
+function selectionOptionHtml({value,name,detail,checked=false,disabled=false,kind}){
+  return `<label class="selection-option${disabled?" disabled":""}"><input type="${kind==="plan"?"radio":"checkbox"}" ${kind==="plan"?'name="addWorkoutPlan"':""} value="${escapeHtml(value)}" ${checked?"checked":""} ${disabled?"disabled":""}><span><b>${escapeHtml(name)}</b><small>${escapeHtml(detail)}</small></span></label>`;
+}
+function renderAvailablePlans(){
+  const host=$("availablePlansList"),used=workoutUsedExerciseIds();
+  if(!state.plans.length){host.innerHTML='<p class="empty-selection muted">No saved plans.</p>';return}
+  host.innerHTML=state.plans.map(plan=>{
+    const total=(plan.items||[]).length,available=availablePlanItems(plan,used).length,disabled=!available;
+    const detail=!total?"Empty plan":disabled?"All exercises added":`${available} exercise${available===1?"":"s"} available`;
+    return selectionOptionHtml({value:plan.id,name:plan.name,detail,checked:plan.id===addWorkoutPlanId,disabled,kind:"plan"});
+  }).join("");
+  host.querySelectorAll('input[name="addWorkoutPlan"]').forEach(input=>input.onchange=()=>{addWorkoutPlanId=input.value;addWorkoutPlanSelection=new Set(availablePlanItems(planById(input.value)).map(item=>item.id));renderAvailablePlanExercises();updateAddWorkoutSelectionStatus()});
+}
+function renderAvailablePlanExercises(){
+  const host=$("availablePlanExercises"),plan=planById(addWorkoutPlanId),available=availablePlanItems(plan);
+  if(!plan){host.innerHTML='<p class="empty-selection muted">All saved plan exercises are already in this workout.</p>';return}
+  host.innerHTML=`<div class="selection-toolbar"><b>${escapeHtml(plan.name)}</b><button id="togglePlanExercisesBtn" type="button" class="secondary compact-button">${available.every(item=>addWorkoutPlanSelection.has(item.id))?"Clear all":"Select all"}</button></div>${available.map(item=>{
+    const ex=exById(item.exerciseId),detail=item.type==="cardio"?`${(item.intervals||[]).join(" / ")} min`:`${item.sets||1} × ${item.reps||1} · ${labels[item.category||ex?.category||"strength"]}`;
+    return selectionOptionHtml({value:item.id,name:ex?.name||item.exerciseName||"Exercise",detail,checked:addWorkoutPlanSelection.has(item.id),kind:"exercise"});
+  }).join("")}`;
+  host.querySelectorAll('input[type="checkbox"]').forEach(input=>input.onchange=()=>{if(input.checked)addWorkoutPlanSelection.add(input.value);else addWorkoutPlanSelection.delete(input.value);renderAvailablePlanExercises();updateAddWorkoutSelectionStatus()});
+  const toggle=$("togglePlanExercisesBtn");if(toggle)toggle.onclick=()=>{const allSelected=available.every(item=>addWorkoutPlanSelection.has(item.id));addWorkoutPlanSelection=allSelected?new Set():new Set(available.map(item=>item.id));renderAvailablePlanExercises();updateAddWorkoutSelectionStatus()};
+}
+function filteredAvailableExercises(){
+  const query=$("addWorkoutExerciseSearch").value.trim().toLowerCase();
+  return availableLibraryExercises().filter(ex=>[ex.name,ex.notes,ex.equipment,ex.movementType,...exercisePrimaryMuscles(ex),...exerciseSecondaryMuscles(ex)].join(" ").toLowerCase().includes(query));
+}
+function renderAvailableExercisesList(){
+  const host=$("availableExercisesList"),filtered=filteredAvailableExercises(),available=availableLibraryExercises();host.innerHTML="";
   for(const category of sections){
-    const exercises=activeExercises(category);if(!exercises.length)continue;
-    const group=document.createElement("optgroup");group.label=labels[category];
-    for(const ex of exercises){
-      totalExercises++;const option=document.createElement("option"),added=used.has(ex.id);
-      option.value=ex.id;option.dataset.category=ex.category;option.textContent=added?`✓ ${ex.name} — Added`:ex.name;option.disabled=added;
-      if(!added&&!firstExercise)firstExercise=option;
-      group.appendChild(option);
-    }
-    exerciseSelect.appendChild(group);
+    const list=filtered.filter(ex=>ex.category===category);if(!list.length)continue;
+    const group=document.createElement("section");group.className="selection-group";group.innerHTML=`<h4>${labels[category]}</h4>`+list.map(ex=>selectionOptionHtml({value:ex.id,name:ex.name,detail:[exercisePrimaryMuscles(ex).slice(0,3).join(", "),ex.equipment].filter(Boolean).join(" · ")||labels[ex.category],checked:addWorkoutExerciseSelection.has(ex.id),kind:"exercise"})).join("");host.appendChild(group);
   }
-  if(!totalExercises){exerciseSelect.innerHTML='<option value="">No Library exercises</option>'}
-  else if(!firstExercise){const option=document.createElement("option");option.value="";option.textContent="All Library exercises are already added";option.disabled=true;option.selected=true;exerciseSelect.prepend(option)}
-  else firstExercise.selected=true;
-  intervalDraft=[10,10];updateQuickExerciseFields();renderQuickIntervals();
+  if(!filtered.length)host.innerHTML=`<p class="empty-selection muted">${available.length?"No exercises match this search.":"All Library exercises are already added."}</p>`;
+  host.querySelectorAll('input[type="checkbox"]').forEach(input=>input.onchange=()=>{if(input.checked)addWorkoutExerciseSelection.add(input.value);else addWorkoutExerciseSelection.delete(input.value);renderAvailableExercisesList();updateAddWorkoutSelectionStatus()});
+  const allSelected=filtered.length&&filtered.every(ex=>addWorkoutExerciseSelection.has(ex.id));
+  $("selectAllExercisesBtn").textContent=allSelected?"Clear filtered":"Select all";$("selectAllExercisesBtn").disabled=!filtered.length;
+  $("exerciseAvailabilityText").textContent=`${available.length} available${filtered.length!==available.length?` · ${filtered.length} shown`:""}`;
 }
-function updateAddMode(){const mode=document.querySelector('input[name="addMode"]:checked').value;$("addPlanPanel").classList.toggle("hidden",mode!=="plan");$("addExercisePanel").classList.toggle("hidden",mode!=="exercise")}
-function updateQuickExerciseFields(){
-  const ex=exById($("availableExercisesSelect").value),isCardio=ex?.category==="cardio";
-  $("strengthQuickFields").classList.toggle("hidden",!ex||isCardio);$("cardioQuickFields").classList.toggle("hidden",!ex||!isCardio);
-  if(ex&&!isCardio){const defaults=trackingDefaults(ex);$("quickSets").value=defaults.sets;$("quickReps").value=defaults.reps}
-  const hint=previousWeightText(ex,selectedDate);$("quickPreviousWeightHint").textContent=hint;$("quickPreviousWeightHint").classList.toggle("hidden",!hint);
+function updateAddWorkoutSelectionStatus(){
+  const mode=document.querySelector('input[name="addMode"]:checked')?.value||"plan",count=mode==="plan"?addWorkoutPlanSelection.size:addWorkoutExerciseSelection.size,button=$("confirmAddWorkoutBtn");
+  button.textContent=`Add ${count} Exercise${count===1?"":"s"}`;button.disabled=count===0;
+  $("addWorkoutSelectionStatus").textContent=count?`${count} exercise${count===1?"":"s"} selected.`:"Select at least one exercise.";
 }
-function renderQuickIntervals(){
-  $("quickCardioIntervals").innerHTML=intervalDraft.map((m,i)=>`<div class="set-row"><div class="unit-input"><input data-i="${i}" type="number" min="1" value="${m}"><b>min</b></div><span></span><button type="button" class="secondary remove-quick-interval" data-i="${i}">×</button></div>`).join("");
-  $("quickCardioIntervals").querySelectorAll("input").forEach(x=>x.onchange=e=>intervalDraft[Number(e.target.dataset.i)]=Number(e.target.value)||1);
-  $("quickCardioIntervals").querySelectorAll(".remove-quick-interval").forEach(b=>b.onclick=()=>{if(intervalDraft.length>1){intervalDraft.splice(Number(b.dataset.i),1);renderQuickIntervals()}});
+function populateAddWorkout(){
+  addWorkoutPlanSelection=new Set();addWorkoutExerciseSelection=new Set();$("addWorkoutExerciseSearch").value="";
+  const firstPlan=state.plans.find(plan=>availablePlanItems(plan).length);addWorkoutPlanId=firstPlan?.id||"";
+  if(firstPlan)addWorkoutPlanSelection=new Set(availablePlanItems(firstPlan).map(item=>item.id));
+  renderAvailablePlans();renderAvailablePlanExercises();renderAvailableExercisesList();updateAddWorkoutSelectionStatus();
 }
+function updateAddMode(){const mode=document.querySelector('input[name="addMode"]:checked').value;$("addPlanPanel").classList.toggle("hidden",mode!=="plan");$("addExercisePanel").classList.toggle("hidden",mode!=="exercise");updateAddWorkoutSelectionStatus()}
 function setAddMode(mode="plan"){
   const input=document.querySelector(`input[name="addMode"][value="${mode}"]`);
   if(input)input.checked=true;
@@ -568,7 +583,7 @@ function setAddMode(mode="plan"){
 function resetAddWorkoutDialog(){
   $("addWorkoutForm").reset();
   $("addWorkoutForm").scrollTop=0;
-  intervalDraft=[10,10];
+  addWorkoutPlanId="";addWorkoutPlanSelection=new Set();addWorkoutExerciseSelection=new Set();
   setAddMode("plan");
 }
 function showDialog(id){
@@ -592,8 +607,20 @@ document.querySelectorAll("dialog").forEach(d=>d.addEventListener("close",()=>{i
 $("saveMetricsBtn").onclick=()=>{const weight=Number($("todayWeight").value),bodyFat=Number($("todayBodyFat").value);if(!weight||!bodyFat)return alert("Enter weight and body fat.");state.metrics[todayKey()]={weight,bodyFat};persist()};
 $("previousWeekBtn").onclick=()=>{weekOffset--;renderWeek()};$("nextWeekBtn").onclick=()=>{weekOffset++;renderWeek()};$("backThisWeekBtn").onclick=()=>{weekOffset=0;selectedDate=todayKey();renderAll()};
 $("openAddWorkoutBtn").onclick=()=>{resetAddWorkoutDialog();populateAddWorkout();setAddMode("plan");showDialog("addWorkoutDialog")};
-document.querySelectorAll('input[name="addMode"]').forEach(r=>r.onchange=updateAddMode);$("availableExercisesSelect").onchange=updateQuickExerciseFields;$("addQuickCardioIntervalBtn").onclick=()=>{intervalDraft.push(intervalDraft.at(-1)||10);renderQuickIntervals()};
-$("addWorkoutForm").onsubmit=e=>{e.preventDefault();const mode=document.querySelector('input[name="addMode"]:checked').value;if(mode==="plan"){const plan=planById($("availablePlansSelect").value);if(!plan)return alert("No plan items available.");if(!addPlanToWorkout(plan))return alert("All exercises from this plan are already in the workout.")}else{const ex=exById($("availableExercisesSelect").value);if(!ex)return alert("No exercise available.");const options=ex.category==="cardio"?{intervals:[...intervalDraft]}:{sets:Number($("quickSets").value)||1,reps:Number($("quickReps").value)||1};if(!addActivityToSession(ex,selectedDate,options))return alert("Exercise already added.")}closeDialog("addWorkoutDialog");persist()};
+document.querySelectorAll('input[name="addMode"]').forEach(r=>r.onchange=updateAddMode);
+$("addWorkoutExerciseSearch").oninput=renderAvailableExercisesList;
+$("selectAllExercisesBtn").onclick=()=>{const filtered=filteredAvailableExercises(),allSelected=filtered.length&&filtered.every(ex=>addWorkoutExerciseSelection.has(ex.id));for(const ex of filtered){if(allSelected)addWorkoutExerciseSelection.delete(ex.id);else addWorkoutExerciseSelection.add(ex.id)}renderAvailableExercisesList();updateAddWorkoutSelectionStatus()};
+$("addWorkoutForm").onsubmit=e=>{
+  e.preventDefault();const mode=document.querySelector('input[name="addMode"]:checked').value;
+  if(mode==="plan"){
+    const plan=planById(addWorkoutPlanId);if(!plan||!addWorkoutPlanSelection.size)return;
+    if(!addPlanToWorkout(plan,addWorkoutPlanSelection))return alert("The selected exercises are already in the workout.");
+  }else{
+    if(!addWorkoutExerciseSelection.size)return;
+    for(const id of addWorkoutExerciseSelection){const ex=exById(id);if(!ex)continue;const defaults=trackingDefaults(ex),options=ex.category==="cardio"?{intervals:[10,10]}:{sets:defaults.sets,reps:defaults.reps};addActivityToSession(ex,selectedDate,options)}
+  }
+  closeDialog("addWorkoutDialog");persist();
+};
 $("addExerciseBtn").onclick=()=>openExercise();
 $("exercisePhoto").onchange=e=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;const file=e.target.files[0];if(file){exercisePhotoObjectUrl=URL.createObjectURL(file);showExercisePhotoPreview(exercisePhotoObjectUrl)}else{const current=exById($("exerciseId").value);showExercisePhotoPreview(current?.photo||"")}};
 $("removeExercisePhotoBtn").onclick=()=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=true;$("exercisePhoto").value="";showExercisePhotoPreview("")};
@@ -604,8 +631,8 @@ document.querySelectorAll('input[name="addToTarget"]').forEach(input=>input.onch
 $("addToPlanSelect").onchange=updateAddToStatus;$("addToNewPlanName").oninput=updateAddToStatus;$("addToCardioIntervalBtn").onclick=()=>{addToIntervalDraft.push(addToIntervalDraft.at(-1)||10);renderAddToIntervals()};
 $("addToForm").onsubmit=e=>{e.preventDefault();const ex=exById($("addToExerciseId").value),target=selectedAddToTarget();if(!ex)return alert("Exercise not found.");const options=addToFormOptions(ex);if(target==="today"){if(!addActivityToSession(ex,todayKey(),options))return alert("Exercise already added to today’s workout.")}else if(target==="existing-plan"){const plan=planById($("addToPlanSelect").value);if(!plan)return alert("No available plan.");plan.items ||= [];if(plan.items.some(item=>item.exerciseId===ex.id))return alert("Exercise already added to this plan.");plan.items.push(createPlanItem(ex,options))}else{const name=$("addToNewPlanName").value.trim();if(!name)return alert("Enter a plan name.");state.plans.push({id:uid(),name,notes:"",intendedFocus:[],items:[createPlanItem(ex,options)]})}closeDialog("addToDialog");persist()};
 $("librarySearch").oninput=renderLibrary;
-$("addPlanBtn").onclick=()=>openPlan();$("planIntendedFocus").addEventListener("change",renderPlanCalculatedFocus);$("planIntendedFocusCustom").addEventListener("input",renderPlanCalculatedFocus);$("planCategorySelect").onchange=()=>{populatePlanExerciseOptions();updatePlanFields();intervalDraft=[10,10];renderPlanIntervals()};$("addPlanCardioIntervalBtn").onclick=()=>{intervalDraft.push(intervalDraft.at(-1)||10);renderPlanIntervals()};$("addPlanItemInlineBtn").onclick=addCurrentPlanItem;
-$("planForm").onsubmit=e=>{e.preventDefault();planDraft.name=$("planName").value.trim();planDraft.notes=$("planNotes").value.trim();planDraft.intendedFocus=readChoiceValues("planIntendedFocus","planIntendedFocusCustom");if(!planDraft.name)return;planDraft.id=planDraft.id||uid();const i=state.plans.findIndex(x=>x.id===planDraft.id);if(i>=0)state.plans[i]=structuredClone(planDraft);else state.plans.push(structuredClone(planDraft));closeDialog("planDialog");persist()};
+$("addPlanBtn").onclick=()=>openPlan();$("planCategorySelect").onchange=()=>{populatePlanExerciseOptions();updatePlanFields();intervalDraft=[10,10];renderPlanIntervals()};$("addPlanCardioIntervalBtn").onclick=()=>{intervalDraft.push(intervalDraft.at(-1)||10);renderPlanIntervals()};$("addPlanItemInlineBtn").onclick=addCurrentPlanItem;
+$("planForm").onsubmit=e=>{e.preventDefault();planDraft.name=$("planName").value.trim();planDraft.notes=$("planNotes").value.trim();if(!planDraft.name)return;planDraft.id=planDraft.id||uid();const i=state.plans.findIndex(x=>x.id===planDraft.id);if(i>=0)state.plans[i]=structuredClone(planDraft);else state.plans.push(structuredClone(planDraft));closeDialog("planDialog");persist()};
 $("openTeacherExportBtn").onclick=openTeacherExport;
 $("teacherWeekDate").onchange=updateTeacherExportStatus;
 $("teacherExportForm").onsubmit=event=>{
