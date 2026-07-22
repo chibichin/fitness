@@ -89,7 +89,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.4.1 — Faster workout building, set steppers, muscle tracking, and teacher spreadsheet export.</p>
+      <p class="muted">Version 1.4.2 — Drag reordering, plan controls, faster workout building, and muscle tracking.</p>
     </article>
   </section>
 </main>
@@ -243,7 +243,7 @@
     <p class="muted field-help">Muscle involvement is calculated automatically from the exercises in this plan.</p>
     <div id="planCalculatedFocus" class="muscle-focus-summary compact hidden"></div>
 
-    <div class="section-head"><h3>Plan items</h3></div>
+    <div class="section-head"><h3>Plan items</h3><span class="muted">Drag ⠿ to reorder</span></div>
     <label><span>Category</span>
       <select id="planCategorySelect">
         <option value="warmup">Warm up</option>
@@ -303,9 +303,9 @@
 
 <dialog id="removeWorkoutItemDialog">
   <div class="confirm-dialog-content">
-    <div class="dialog-title"><h3>Remove exercise?</h3><button type="button" class="secondary icon-button" data-close="removeWorkoutItemDialog">×</button></div>
+    <div class="dialog-title"><h3 id="removeWorkoutDialogTitle">Remove exercise?</h3><button type="button" class="secondary icon-button" data-close="removeWorkoutItemDialog">×</button></div>
     <p id="removeWorkoutItemMessage"></p>
-    <p class="muted">This only removes it from this date. Your Library and saved plan will not change.</p>
+    <p id="removeWorkoutItemNote" class="muted">This only removes it from this date. Your Library and saved plan will not change.</p>
     <div class="dialog-actions">
       <button id="cancelRemoveWorkoutItemBtn" type="button" class="secondary" data-close="removeWorkoutItemDialog">Cancel</button>
       <button id="confirmRemoveWorkoutItemBtn" type="button" class="danger">Remove</button>

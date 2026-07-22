@@ -158,12 +158,51 @@ function workoutGroups(w){
     const category=itemCategory(item),isPlanItem=Boolean(item.sourcePlanId),key=isPlanItem?`plan:${item.sourcePlanId}`:`category:${category}`;
     if(!lookup.has(key)){
       const plan=isPlanItem?planById(item.sourcePlanId):null;
-      const group={key,title:isPlanItem?(plan?.name||item.sourcePlanName||"Plan"):labels[category],items:[]};
+      const group={key,title:isPlanItem?(plan?.name||item.sourcePlanName||"Plan"):labels[category],items:[],isPlan:isPlanItem,sourcePlanId:isPlanItem?item.sourcePlanId:""};
       lookup.set(key,group);groups.push(group);
     }
     lookup.get(key).items.push(item);
   }
   return groups;
+}
+function enablePointerSort({container,itemSelector,handleSelector,idKey,onCommit}){
+  const orderedIds=()=>[...container.querySelectorAll(itemSelector)].map(item=>item.dataset[idKey]).filter(Boolean);
+  const commit=()=>onCommit(orderedIds());
+  container.querySelectorAll(handleSelector).forEach(handle=>{
+    handle.onkeydown=event=>{
+      if(event.key!=="ArrowUp"&&event.key!=="ArrowDown")return;
+      const item=handle.closest(itemSelector),items=[...container.querySelectorAll(itemSelector)],index=items.indexOf(item),target=event.key==="ArrowUp"?items[index-1]:items[index+1];
+      if(!target)return;event.preventDefault();
+      if(event.key==="ArrowUp")container.insertBefore(item,target);else container.insertBefore(target,item);
+      commit();handle.focus();
+    };
+    handle.onpointerdown=event=>{
+      if(event.button!==0)return;
+      const item=handle.closest(itemSelector);if(!item)return;
+      event.preventDefault();handle.setPointerCapture?.(event.pointerId);item.classList.add("dragging");container.classList.add("sorting");
+      let moved=false;
+      let scrollParent=container.parentElement;
+      while(scrollParent&&scrollParent!==document.body&&scrollParent.scrollHeight<=scrollParent.clientHeight)scrollParent=scrollParent.parentElement;
+      if(!scrollParent||scrollParent===document.body)scrollParent=document.scrollingElement;
+      const move=moveEvent=>{
+        moveEvent.preventDefault();moved=true;
+        const target=document.elementFromPoint(moveEvent.clientX,moveEvent.clientY)?.closest(itemSelector);
+        if(target&&target!==item&&target.parentElement===container){const rect=target.getBoundingClientRect();container.insertBefore(item,moveEvent.clientY<rect.top+rect.height/2?target:target.nextSibling)}
+        const bounds=scrollParent===document.scrollingElement?{top:0,bottom:window.innerHeight}:scrollParent.getBoundingClientRect();
+        if(moveEvent.clientY<bounds.top+54)scrollParent.scrollTop-=12;else if(moveEvent.clientY>bounds.bottom-54)scrollParent.scrollTop+=12;
+      };
+      const finish=()=>{handle.removeEventListener("pointermove",move);handle.removeEventListener("pointerup",finish);handle.removeEventListener("pointercancel",finish);item.classList.remove("dragging");container.classList.remove("sorting");if(moved)commit()};
+      handle.addEventListener("pointermove",move);handle.addEventListener("pointerup",finish);handle.addEventListener("pointercancel",finish);
+    };
+  });
+}
+function reorderWorkoutGroups(groupKeys){
+  const w=workoutFor(selectedDate),groups=workoutGroups(w),byKey=new Map(groups.map(group=>[group.key,group])),ordered=groupKeys.map(key=>byKey.get(key)).filter(Boolean);
+  groups.filter(group=>!groupKeys.includes(group.key)).forEach(group=>ordered.push(group));w.items=ordered.flatMap(group=>group.items);saveState(state);
+}
+function reorderWorkoutGroupItems(groupKey,itemIds){
+  const w=workoutFor(selectedDate),groups=workoutGroups(w),group=groups.find(entry=>entry.key===groupKey);if(!group)return;
+  const byId=new Map(group.items.map(item=>[item.id,item]));group.items=itemIds.map(id=>byId.get(id)).filter(Boolean);w.items=groups.flatMap(entry=>entry.items);saveState(state);
 }
 function renderTodayMuscleFocus(w){
   const host=$("todayMuscleFocus");
@@ -177,10 +216,14 @@ function renderWorkout(){
   if(!w?.items?.length){host.innerHTML='<p class="muted">No workout planned for this date.</p>';return}
   for(const group of workoutGroups(w)){
     const entries=group.items,doneCount=entries.filter(isDone).length;
-    const section=document.createElement("section");section.className="workout-section";
+    const section=document.createElement("section");section.className="workout-section";section.dataset.groupKey=group.key;
     const header=document.createElement("button");header.className="workout-section-header";
-    header.innerHTML=`<span><b>${group.title}</b><small>${doneCount}/${entries.length} complete</small></span><b>⌄</b>`;
-    const body=document.createElement("div");body.className="workout-section-body";
+    header.innerHTML=`<span><b>${escapeHtml(group.title)}</b><small>${doneCount}/${entries.length} complete</small></span><b>⌄</b>`;
+    const top=document.createElement("div");top.className="workout-section-top";
+    top.innerHTML=`<button type="button" class="secondary drag-handle panel-drag-handle" aria-label="Reorder ${escapeHtml(group.title)} panel" title="Drag to reorder; arrow keys also work">⠿</button>`;
+    top.appendChild(header);
+    if(group.isPlan){const remove=document.createElement("button");remove.type="button";remove.className="secondary remove-plan-from-workout";remove.textContent="Remove";remove.setAttribute("aria-label",`Remove ${group.title} plan from workout`);remove.onclick=()=>openRemoveWorkoutGroup(group);top.appendChild(remove)}
+    const body=document.createElement("div");body.className="workout-section-body";body.dataset.groupKey=group.key;
     const storageKey=`section-open-${selectedDate}-${group.key}`;
     let open=localStorage.getItem(storageKey)!=="false";
     if(doneCount===entries.length)open=false;
@@ -189,23 +232,32 @@ function renderWorkout(){
     let divider=false;
     for(const item of entries){
       if(isDone(item)&&!divider){const d=document.createElement("div");d.className="completed-label";d.textContent="Completed";body.appendChild(d);divider=true}
-      body.appendChild(renderWorkoutItem(item));
+      const card=renderWorkoutItem(item);card.dataset.itemId=item.id;body.appendChild(card);
     }
-    section.append(header,body);host.appendChild(section);
+    section.append(top,body);host.appendChild(section);
+    enablePointerSort({container:body,itemSelector:".workout-item",handleSelector:".exercise-drag-handle",idKey:"itemId",onCommit:ids=>reorderWorkoutGroupItems(group.key,ids)});
   }
+  enablePointerSort({container:host,itemSelector:".workout-section",handleSelector:".panel-drag-handle",idKey:"groupKey",onCommit:reorderWorkoutGroups});
 }
 function closeItemMenus(except=null){document.querySelectorAll(".item-menu").forEach(menu=>{if(menu!==except){menu.classList.add("hidden");menu.closest(".workout-item")?.querySelector(".more")?.setAttribute("aria-expanded","false")}})}
 function openRemoveWorkoutItem(item){
-  pendingWorkoutItemRemoval={date:selectedDate,itemId:item.id};
+  pendingWorkoutItemRemoval={type:"item",date:selectedDate,itemId:item.id};
   const ex=exById(item.exerciseId),name=ex?.name||item.exerciseName||"this exercise",plan=item.sourcePlanId?(planById(item.sourcePlanId)?.name||item.sourcePlanName):"";
+  $("removeWorkoutDialogTitle").textContent="Remove exercise?";
   $("removeWorkoutItemMessage").textContent=plan?`Remove ${name} from “${plan}”?`:`Remove ${name} from this workout?`;
+  $("removeWorkoutItemNote").textContent="This only removes it from this date. Your Library and saved plan will not change.";
   showDialog("removeWorkoutItemDialog");
   requestAnimationFrame(()=>$("cancelRemoveWorkoutItemBtn").focus());
+}
+function openRemoveWorkoutGroup(group){
+  pendingWorkoutItemRemoval={type:"group",date:selectedDate,itemIds:group.items.map(item=>item.id),sourcePlanId:group.sourcePlanId};
+  $("removeWorkoutDialogTitle").textContent="Remove plan?";$("removeWorkoutItemMessage").textContent=`Remove “${group.title}” and all ${group.items.length} exercise${group.items.length===1?"":"s"} from this workout?`;
+  $("removeWorkoutItemNote").textContent="This only removes the plan from this date. Your saved Plan and Library will not change.";showDialog("removeWorkoutItemDialog");requestAnimationFrame(()=>$("cancelRemoveWorkoutItemBtn").focus());
 }
 function renderWorkoutItem(item){
   const ex=exById(item.exerciseId),displayName=ex?.name||item.exerciseName||"Exercise",card=document.createElement("div");card.className="workout-item"+(isDone(item)?" completed":"");
   const setActions=item.type==="cardio"?"":'<button class="secondary add-set-action" type="button">Add set</button><button class="secondary remove-set-action" type="button">Remove last set</button>';
-  card.innerHTML=`<div class="item-head"><div><strong>${escapeHtml(displayName)}</strong><div class="muted">${labels[itemCategory(item)]}</div></div><div class="item-actions"><button class="secondary reference" type="button">Ref</button><button class="secondary more" type="button" aria-label="Exercise actions" aria-expanded="false">⋯</button></div></div><div class="item-menu hidden">${setActions}<button class="danger remove-exercise-action" type="button">Remove exercise</button></div><div class="item-body"></div>`;
+  card.innerHTML=`<div class="item-head"><div class="item-title-with-drag"><button type="button" class="secondary drag-handle exercise-drag-handle" aria-label="Reorder ${escapeHtml(displayName)}" title="Drag to reorder; arrow keys also work">⠿</button><div><strong>${escapeHtml(displayName)}</strong><div class="muted">${labels[itemCategory(item)]}</div></div></div><div class="item-actions"><button class="secondary reference" type="button">Ref</button><button class="secondary more" type="button" aria-label="Exercise actions" aria-expanded="false">⋯</button></div></div><div class="item-menu hidden">${setActions}<button class="danger remove-exercise-action" type="button">Remove exercise</button></div><div class="item-body"></div>`;
   const menu=card.querySelector(".item-menu"),more=card.querySelector(".more");
   more.onclick=e=>{e.stopPropagation();const willOpen=menu.classList.contains("hidden");closeItemMenus(menu);menu.classList.toggle("hidden",!willOpen);more.setAttribute("aria-expanded",String(willOpen))};
   menu.onclick=e=>e.stopPropagation();
@@ -299,16 +351,13 @@ function renderPlanCalculatedFocus(){
   host.innerHTML=html;host.classList.toggle("hidden",!html);
 }
 function renderPlanDraft(){
-  const grouped=sections.map(category=>{
-    const list=(planDraft.items||[]).filter(x=>x.category===category);
-    if(!list.length)return "";
-    return `<h3 class="plan-items-heading">${labels[category]}</h3>`+list.map(x=>{
-      const ex=exById(x.exerciseId),summary=x.type==="cardio"?`${(x.intervals||[]).join(" / ")} min`:`${x.sets} × ${x.reps}`;
-      return `<div class="plan-item"><div class="section-head"><div><strong>${ex?.name||x.exerciseName||"Exercise"}</strong><div class="muted">${summary}</div></div><button type="button" class="secondary remove-plan-item" data-id="${x.id}">Remove</button></div></div>`;
-    }).join("");
-  }).join("");
-  $("planItemsList").innerHTML=grouped||'<p class="muted">No items.</p>';
-  $("planItemsList").querySelectorAll(".remove-plan-item").forEach(b=>b.onclick=()=>{planDraft.items=planDraft.items.filter(x=>x.id!==b.dataset.id);renderPlanDraft();populatePlanExerciseOptions()});
+  const host=$("planItemsList");
+  host.innerHTML=(planDraft.items||[]).map(x=>{
+    const ex=exById(x.exerciseId),summary=x.type==="cardio"?`${(x.intervals||[]).join(" / ")} min`:`${x.sets} × ${x.reps}`;
+    return `<div class="plan-item" data-item-id="${escapeHtml(x.id)}"><div class="plan-item-row"><button type="button" class="secondary drag-handle plan-item-drag-handle" aria-label="Reorder ${escapeHtml(ex?.name||x.exerciseName||"Exercise")}" title="Drag to reorder; arrow keys also work">⠿</button><div class="plan-item-copy"><strong>${escapeHtml(ex?.name||x.exerciseName||"Exercise")}</strong><div class="muted">${labels[x.category||ex?.category||"strength"]} · ${escapeHtml(summary)}</div></div><button type="button" class="secondary remove-plan-item" data-id="${escapeHtml(x.id)}">Remove</button></div></div>`;
+  }).join("")||'<p class="muted">No items.</p>';
+  host.querySelectorAll(".remove-plan-item").forEach(b=>b.onclick=()=>{planDraft.items=planDraft.items.filter(x=>x.id!==b.dataset.id);renderPlanDraft();populatePlanExerciseOptions()});
+  enablePointerSort({container:host,itemSelector:".plan-item",handleSelector:".plan-item-drag-handle",idKey:"itemId",onCommit:ids=>{const byId=new Map(planDraft.items.map(item=>[item.id,item]));planDraft.items=ids.map(id=>byId.get(id)).filter(Boolean)}});
   renderPlanCalculatedFocus();
 }
 function addCurrentPlanItem(){
@@ -624,7 +673,12 @@ $("addWorkoutForm").onsubmit=e=>{
 $("addExerciseBtn").onclick=()=>openExercise();
 $("exercisePhoto").onchange=e=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;const file=e.target.files[0];if(file){exercisePhotoObjectUrl=URL.createObjectURL(file);showExercisePhotoPreview(exercisePhotoObjectUrl)}else{const current=exById($("exerciseId").value);showExercisePhotoPreview(current?.photo||"")}};
 $("removeExercisePhotoBtn").onclick=()=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=true;$("exercisePhoto").value="";showExercisePhotoPreview("")};
-$("confirmRemoveWorkoutItemBtn").onclick=()=>{if(!pendingWorkoutItemRemoval)return closeDialog("removeWorkoutItemDialog");const w=workoutFor(pendingWorkoutItemRemoval.date);if(w)w.items=w.items.filter(x=>x.id!==pendingWorkoutItemRemoval.itemId);pendingWorkoutItemRemoval=null;closeDialog("removeWorkoutItemDialog");persist()};
+$("confirmRemoveWorkoutItemBtn").onclick=()=>{
+  if(!pendingWorkoutItemRemoval)return closeDialog("removeWorkoutItemDialog");const pending=pendingWorkoutItemRemoval,w=workoutFor(pending.date);
+  if(w&&pending.type==="group"){const ids=new Set(pending.itemIds||[]);w.items=w.items.filter(item=>!ids.has(item.id));w.planIds=(w.planIds||[]).filter(id=>id!==pending.sourcePlanId)}
+  else if(w)w.items=w.items.filter(item=>item.id!==pending.itemId);
+  pendingWorkoutItemRemoval=null;closeDialog("removeWorkoutItemDialog");persist();
+};
 document.addEventListener("click",()=>closeItemMenus());
 $("exerciseForm").onsubmit=async e=>{e.preventDefault();const addAfterSave=e.submitter?.value==="save-add",id=$("exerciseId").value,name=$("exerciseName").value.trim();if(!name)return;const exact=state.exercises.some(x=>x.id!==id&&normalizeName(x.name)===normalizeName(name));if(exact)return alert("This exercise already exists.");const similar=similarName(name,id);if(similar&&!confirm(`A similar exercise already exists: ${similar.name}\n\nSave anyway?`))return;const old=id?exById(id):null;let photo=removeExercisePhotoRequested?"":(old?.photo||"");if($("exercisePhoto").files[0])photo=await fileToDataUrl($("exercisePhoto").files[0]);const primaryMuscles=readChoiceValues("exercisePrimaryMuscles","exercisePrimaryCustom"),primaryKeys=new Set(primaryMuscles.map(x=>x.toLowerCase())),secondaryMuscles=readChoiceValues("exerciseSecondaryMuscles","exerciseSecondaryCustom").filter(x=>!primaryKeys.has(x.toLowerCase()));const record={id:id||uid(),name,category:$("exerciseCategory").value,primaryMuscles,secondaryMuscles,equipment:$("exerciseEquipment").value,movementType:$("exerciseMovementType").value,muscle:primaryMuscles.join(", "),photo,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};if(id)state.exercises[state.exercises.findIndex(x=>x.id===id)]=record;else state.exercises.push(record);clearExercisePhotoObjectUrl();closeDialog("exerciseDialog");persist();if(addAfterSave)requestAnimationFrame(()=>openAddTo(exById(record.id)))};
 document.querySelectorAll('input[name="addToTarget"]').forEach(input=>input.onchange=updateAddToTarget);
