@@ -182,7 +182,7 @@ function renderWorkout(){
     header.innerHTML=`<span><b>${escapeHtml(group.title)}</b><small>${doneCount}/${entries.length} complete</small></span><b>⌄</b>`;
     const top=document.createElement("div");top.className="workout-section-top";
     top.appendChild(header);
-    if(group.isPlan){const remove=document.createElement("button");remove.type="button";remove.className="secondary remove-plan-from-workout";remove.textContent="Remove";remove.setAttribute("aria-label",`Remove ${group.title} plan from workout`);remove.onclick=()=>openRemoveWorkoutGroup(group);top.appendChild(remove)}
+    const remove=document.createElement("button");remove.type="button";remove.className="secondary remove-panel-from-workout";remove.textContent="Remove";remove.setAttribute("aria-label",`Remove ${group.title} panel from workout`);remove.onclick=()=>openRemoveWorkoutGroup(group);top.appendChild(remove);
     const body=document.createElement("div");body.className="workout-section-body";
     const storageKey=`section-open-${selectedDate}-${group.key}`;
     let open=localStorage.getItem(storageKey)!=="false";
@@ -209,8 +209,13 @@ function openRemoveWorkoutItem(item){
 }
 function openRemoveWorkoutGroup(group){
   pendingWorkoutItemRemoval={type:"group",date:selectedDate,itemIds:group.items.map(item=>item.id),sourcePlanId:group.sourcePlanId};
-  $("removeWorkoutDialogTitle").textContent="Remove plan?";$("removeWorkoutItemMessage").textContent=`Remove “${group.title}” and all ${group.items.length} exercise${group.items.length===1?"":"s"} from this workout?`;
-  $("removeWorkoutItemNote").textContent="This only removes the plan from this date. Your saved Plan and Library will not change.";showDialog("removeWorkoutItemDialog");requestAnimationFrame(()=>$("cancelRemoveWorkoutItemBtn").focus());
+  $("removeWorkoutDialogTitle").textContent="Remove panel?";$("removeWorkoutItemMessage").textContent=`Remove the “${group.title}” panel and all ${group.items.length} exercise${group.items.length===1?"":"s"} from this workout?`;
+  $("removeWorkoutItemNote").textContent="This only removes this panel from this date. Your Library and saved Plans will not change.";showDialog("removeWorkoutItemDialog");requestAnimationFrame(()=>$("cancelRemoveWorkoutItemBtn").focus());
+}
+function applyWorkoutRemoval(pending){
+  const w=workoutFor(pending.date);if(!w)return;
+  if(pending.type==="group"){const ids=new Set(pending.itemIds||[]);w.items=w.items.filter(item=>!ids.has(item.id));if(pending.sourcePlanId)w.planIds=(w.planIds||[]).filter(id=>id!==pending.sourcePlanId)}
+  else w.items=w.items.filter(item=>item.id!==pending.itemId);
 }
 function renderWorkoutItem(item){
   const ex=exById(item.exerciseId),displayName=ex?.name||item.exerciseName||"Exercise",card=document.createElement("div");card.className="workout-item"+(isDone(item)?" completed":"");
@@ -631,9 +636,7 @@ $("addExerciseBtn").onclick=()=>openExercise();
 $("exercisePhoto").onchange=e=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;const file=e.target.files[0];if(file){exercisePhotoObjectUrl=URL.createObjectURL(file);showExercisePhotoPreview(exercisePhotoObjectUrl)}else{const current=exById($("exerciseId").value);showExercisePhotoPreview(current?.photo||"")}};
 $("removeExercisePhotoBtn").onclick=()=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=true;$("exercisePhoto").value="";showExercisePhotoPreview("")};
 $("confirmRemoveWorkoutItemBtn").onclick=()=>{
-  if(!pendingWorkoutItemRemoval)return closeDialog("removeWorkoutItemDialog");const pending=pendingWorkoutItemRemoval,w=workoutFor(pending.date);
-  if(w&&pending.type==="group"){const ids=new Set(pending.itemIds||[]);w.items=w.items.filter(item=>!ids.has(item.id));w.planIds=(w.planIds||[]).filter(id=>id!==pending.sourcePlanId)}
-  else if(w)w.items=w.items.filter(item=>item.id!==pending.itemId);
+  if(!pendingWorkoutItemRemoval)return closeDialog("removeWorkoutItemDialog");const pending=pendingWorkoutItemRemoval;applyWorkoutRemoval(pending);
   pendingWorkoutItemRemoval=null;closeDialog("removeWorkoutItemDialog");persist();
 };
 document.addEventListener("click",()=>closeItemMenus());
