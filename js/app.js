@@ -165,45 +165,6 @@ function workoutGroups(w){
   }
   return groups;
 }
-function enablePointerSort({container,itemSelector,handleSelector,idKey,onCommit}){
-  const orderedIds=()=>[...container.querySelectorAll(itemSelector)].map(item=>item.dataset[idKey]).filter(Boolean);
-  const commit=()=>onCommit(orderedIds());
-  container.querySelectorAll(handleSelector).forEach(handle=>{
-    handle.onkeydown=event=>{
-      if(event.key!=="ArrowUp"&&event.key!=="ArrowDown")return;
-      const item=handle.closest(itemSelector),items=[...container.querySelectorAll(itemSelector)],index=items.indexOf(item),target=event.key==="ArrowUp"?items[index-1]:items[index+1];
-      if(!target)return;event.preventDefault();
-      if(event.key==="ArrowUp")container.insertBefore(item,target);else container.insertBefore(target,item);
-      commit();handle.focus();
-    };
-    handle.onpointerdown=event=>{
-      if(event.button!==0)return;
-      const item=handle.closest(itemSelector);if(!item)return;
-      event.preventDefault();handle.setPointerCapture?.(event.pointerId);item.classList.add("dragging");container.classList.add("sorting");
-      let moved=false;
-      let scrollParent=container.parentElement;
-      while(scrollParent&&scrollParent!==document.body&&scrollParent.scrollHeight<=scrollParent.clientHeight)scrollParent=scrollParent.parentElement;
-      if(!scrollParent||scrollParent===document.body)scrollParent=document.scrollingElement;
-      const move=moveEvent=>{
-        moveEvent.preventDefault();moved=true;
-        const target=document.elementFromPoint(moveEvent.clientX,moveEvent.clientY)?.closest(itemSelector);
-        if(target&&target!==item&&target.parentElement===container){const rect=target.getBoundingClientRect();container.insertBefore(item,moveEvent.clientY<rect.top+rect.height/2?target:target.nextSibling)}
-        const bounds=scrollParent===document.scrollingElement?{top:0,bottom:window.innerHeight}:scrollParent.getBoundingClientRect();
-        if(moveEvent.clientY<bounds.top+54)scrollParent.scrollTop-=12;else if(moveEvent.clientY>bounds.bottom-54)scrollParent.scrollTop+=12;
-      };
-      const finish=()=>{handle.removeEventListener("pointermove",move);handle.removeEventListener("pointerup",finish);handle.removeEventListener("pointercancel",finish);item.classList.remove("dragging");container.classList.remove("sorting");if(moved)commit()};
-      handle.addEventListener("pointermove",move);handle.addEventListener("pointerup",finish);handle.addEventListener("pointercancel",finish);
-    };
-  });
-}
-function reorderWorkoutGroups(groupKeys){
-  const w=workoutFor(selectedDate),groups=workoutGroups(w),byKey=new Map(groups.map(group=>[group.key,group])),ordered=groupKeys.map(key=>byKey.get(key)).filter(Boolean);
-  groups.filter(group=>!groupKeys.includes(group.key)).forEach(group=>ordered.push(group));w.items=ordered.flatMap(group=>group.items);saveState(state);
-}
-function reorderWorkoutGroupItems(groupKey,itemIds){
-  const w=workoutFor(selectedDate),groups=workoutGroups(w),group=groups.find(entry=>entry.key===groupKey);if(!group)return;
-  const byId=new Map(group.items.map(item=>[item.id,item]));group.items=itemIds.map(id=>byId.get(id)).filter(Boolean);w.items=groups.flatMap(entry=>entry.items);saveState(state);
-}
 function renderTodayMuscleFocus(w){
   const host=$("todayMuscleFocus");
   if(!w?.items?.length){host.innerHTML="";host.classList.add("hidden");return}
@@ -216,14 +177,13 @@ function renderWorkout(){
   if(!w?.items?.length){host.innerHTML='<p class="muted">No workout planned for this date.</p>';return}
   for(const group of workoutGroups(w)){
     const entries=group.items,doneCount=entries.filter(isDone).length;
-    const section=document.createElement("section");section.className="workout-section";section.dataset.groupKey=group.key;
+    const section=document.createElement("section");section.className="workout-section";
     const header=document.createElement("button");header.className="workout-section-header";
     header.innerHTML=`<span><b>${escapeHtml(group.title)}</b><small>${doneCount}/${entries.length} complete</small></span><b>⌄</b>`;
     const top=document.createElement("div");top.className="workout-section-top";
-    top.innerHTML=`<button type="button" class="secondary drag-handle panel-drag-handle" aria-label="Reorder ${escapeHtml(group.title)} panel" title="Drag to reorder; arrow keys also work">⠿</button>`;
     top.appendChild(header);
     if(group.isPlan){const remove=document.createElement("button");remove.type="button";remove.className="secondary remove-plan-from-workout";remove.textContent="Remove";remove.setAttribute("aria-label",`Remove ${group.title} plan from workout`);remove.onclick=()=>openRemoveWorkoutGroup(group);top.appendChild(remove)}
-    const body=document.createElement("div");body.className="workout-section-body";body.dataset.groupKey=group.key;
+    const body=document.createElement("div");body.className="workout-section-body";
     const storageKey=`section-open-${selectedDate}-${group.key}`;
     let open=localStorage.getItem(storageKey)!=="false";
     if(doneCount===entries.length)open=false;
@@ -232,12 +192,10 @@ function renderWorkout(){
     let divider=false;
     for(const item of entries){
       if(isDone(item)&&!divider){const d=document.createElement("div");d.className="completed-label";d.textContent="Completed";body.appendChild(d);divider=true}
-      const card=renderWorkoutItem(item);card.dataset.itemId=item.id;body.appendChild(card);
+      body.appendChild(renderWorkoutItem(item));
     }
     section.append(top,body);host.appendChild(section);
-    enablePointerSort({container:body,itemSelector:".workout-item",handleSelector:".exercise-drag-handle",idKey:"itemId",onCommit:ids=>reorderWorkoutGroupItems(group.key,ids)});
   }
-  enablePointerSort({container:host,itemSelector:".workout-section",handleSelector:".panel-drag-handle",idKey:"groupKey",onCommit:reorderWorkoutGroups});
 }
 function closeItemMenus(except=null){document.querySelectorAll(".item-menu").forEach(menu=>{if(menu!==except){menu.classList.add("hidden");menu.closest(".workout-item")?.querySelector(".more")?.setAttribute("aria-expanded","false")}})}
 function openRemoveWorkoutItem(item){
@@ -257,7 +215,7 @@ function openRemoveWorkoutGroup(group){
 function renderWorkoutItem(item){
   const ex=exById(item.exerciseId),displayName=ex?.name||item.exerciseName||"Exercise",card=document.createElement("div");card.className="workout-item"+(isDone(item)?" completed":"");
   const setActions=item.type==="cardio"?"":'<button class="secondary add-set-action" type="button">Add set</button><button class="secondary remove-set-action" type="button">Remove last set</button>';
-  card.innerHTML=`<div class="item-head"><div class="item-title-with-drag"><button type="button" class="secondary drag-handle exercise-drag-handle" aria-label="Reorder ${escapeHtml(displayName)}" title="Drag to reorder; arrow keys also work">⠿</button><div><strong>${escapeHtml(displayName)}</strong><div class="muted">${labels[itemCategory(item)]}</div></div></div><div class="item-actions"><button class="secondary reference" type="button">Ref</button><button class="secondary more" type="button" aria-label="Exercise actions" aria-expanded="false">⋯</button></div></div><div class="item-menu hidden">${setActions}<button class="danger remove-exercise-action" type="button">Remove exercise</button></div><div class="item-body"></div>`;
+  card.innerHTML=`<div class="item-head"><div><strong>${escapeHtml(displayName)}</strong><div class="muted">${labels[itemCategory(item)]}</div></div><div class="item-actions"><button class="secondary reference" type="button">Ref</button><button class="secondary more" type="button" aria-label="Exercise actions" aria-expanded="false">⋯</button></div></div><div class="item-menu hidden">${setActions}<button class="danger remove-exercise-action" type="button">Remove exercise</button></div><div class="item-body"></div>`;
   const menu=card.querySelector(".item-menu"),more=card.querySelector(".more");
   more.onclick=e=>{e.stopPropagation();const willOpen=menu.classList.contains("hidden");closeItemMenus(menu);menu.classList.toggle("hidden",!willOpen);more.setAttribute("aria-expanded",String(willOpen))};
   menu.onclick=e=>e.stopPropagation();
@@ -354,10 +312,9 @@ function renderPlanDraft(){
   const host=$("planItemsList");
   host.innerHTML=(planDraft.items||[]).map(x=>{
     const ex=exById(x.exerciseId),summary=x.type==="cardio"?`${(x.intervals||[]).join(" / ")} min`:`${x.sets} × ${x.reps}`;
-    return `<div class="plan-item" data-item-id="${escapeHtml(x.id)}"><div class="plan-item-row"><button type="button" class="secondary drag-handle plan-item-drag-handle" aria-label="Reorder ${escapeHtml(ex?.name||x.exerciseName||"Exercise")}" title="Drag to reorder; arrow keys also work">⠿</button><div class="plan-item-copy"><strong>${escapeHtml(ex?.name||x.exerciseName||"Exercise")}</strong><div class="muted">${labels[x.category||ex?.category||"strength"]} · ${escapeHtml(summary)}</div></div><button type="button" class="secondary remove-plan-item" data-id="${escapeHtml(x.id)}">Remove</button></div></div>`;
+    return `<div class="plan-item"><div class="plan-item-row"><div class="plan-item-copy"><strong>${escapeHtml(ex?.name||x.exerciseName||"Exercise")}</strong><div class="muted">${labels[x.category||ex?.category||"strength"]} · ${escapeHtml(summary)}</div></div><button type="button" class="secondary remove-plan-item" data-id="${escapeHtml(x.id)}">Remove</button></div></div>`;
   }).join("")||'<p class="muted">No items.</p>';
   host.querySelectorAll(".remove-plan-item").forEach(b=>b.onclick=()=>{planDraft.items=planDraft.items.filter(x=>x.id!==b.dataset.id);renderPlanDraft();populatePlanExerciseOptions()});
-  enablePointerSort({container:host,itemSelector:".plan-item",handleSelector:".plan-item-drag-handle",idKey:"itemId",onCommit:ids=>{const byId=new Map(planDraft.items.map(item=>[item.id,item]));planDraft.items=ids.map(id=>byId.get(id)).filter(Boolean)}});
   renderPlanCalculatedFocus();
 }
 function addCurrentPlanItem(){
