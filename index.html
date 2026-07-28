@@ -83,13 +83,14 @@
     </article>
     <article class="card">
       <h3>Data</h3>
+      <p id="storageUsage" class="muted"></p>
       <button id="exportBackupBtn" class="full">Export backup</button>
       <label class="file-button secondary full">Restore backup<input id="restoreBackupInput" type="file" accept=".json,application/json"></label>
       <button id="clearDataBtn" class="danger full">Clear all data</button>
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.4.4 — Whole-panel removal, reliable exercise menus, faster workout building, and muscle tracking.</p>
+      <p class="muted">Version 1.4.5 — Automatic photo compression, safer backup restore, whole-panel removal, and muscle tracking.</p>
     </article>
   </section>
 </main>
@@ -175,6 +176,7 @@
       </label>
     </div>
     <label><span>Reference photo</span><input id="exercisePhoto" type="file" accept="image/*"></label>
+    <p id="exercisePhotoStatus" class="muted photo-status">Large photos are automatically optimized before saving.</p>
     <div id="exercisePhotoPreviewWrap" class="photo-preview-wrap hidden">
       <img id="exercisePhotoPreview" class="exercise-photo-preview" alt="Current exercise reference">
       <button id="removeExercisePhotoBtn" type="button" class="secondary full">Remove photo</button>

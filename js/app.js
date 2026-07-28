@@ -1,5 +1,6 @@
 import {loadState,saveState,makeDefaultState,downloadBackup,uid} from "./storage.js";
 import {downloadTeacherWorkbook} from "./xlsx.js";
+import {compressPhotoFile,compressStatePhotos,dataUrlBinaryBytes,formatBytes} from "./photo.js";
 
 let state=loadState();
 let selectedDate=todayKey();
@@ -10,6 +11,9 @@ let addToIntervalDraft=[10,10];
 let pendingWorkoutItemRemoval=null;
 let exercisePhotoObjectUrl="";
 let removeExercisePhotoRequested=false;
+let pendingExercisePhotoDataUrl=null;
+let exercisePhotoCompressionPromise=null;
+let exercisePhotoSelectionToken=0;
 let addWorkoutPlanId="";
 let addWorkoutPlanSelection=new Set();
 let addWorkoutExerciseSelection=new Set();
@@ -29,11 +33,17 @@ function planById(id){return state.plans.find(x=>x.id===id)}
 function activeExercises(category){return state.exercises.filter(x=>!x.archived&&(!category||x.category===category))}
 function itemCategory(item){return item.category||exById(item.exerciseId)?.category||"strength"}
 function isDone(item){return item.type==="cardio"?(item.intervals?.length>0&&item.intervals.every(x=>x.done)):(item.sets?.length>0&&item.sets.every(x=>x.done))}
-function persist(){saveState(state);renderAll()}
+function storageErrorMessage(error){
+  if(error?.name==="StorageFullError")return "Photo storage is full. Export a backup, then optimize or remove a large photo before adding more.";
+  return "This change could not be saved. Please export a backup and try again.";
+}
+function persist(){
+  try{saveState(state);renderAll();return true}
+  catch(error){console.error(error);alert(storageErrorMessage(error));return false}
+}
 function workoutFor(key,create=false){if(!state.workouts[key]&&create){state.workouts[key]={date:key,planIds:[],items:[]};saveState(state)}return state.workouts[key]}
 function normalizeName(s){return s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g,"")}
 function similarName(name,id=""){const n=normalizeName(name);return state.exercises.find(x=>x.id!==id&&(normalizeName(x.name)===n||normalizeName(x.name).includes(n)||n.includes(normalizeName(x.name))))}
-function fileToDataUrl(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]))}
 function splitList(value){return (Array.isArray(value)?value:String(value||"").split(/[,;/]+/)).map(x=>String(x).trim()).filter(Boolean)}
 function uniqueList(values){const seen=new Set();return splitList(values).filter(value=>{const key=value.toLowerCase();if(seen.has(key))return false;seen.add(key);return true})}
@@ -522,15 +532,24 @@ function openTeacherExport(){
   updateTeacherExportStatus();showDialog("teacherExportDialog");
 }
 
-function renderAll(){renderHeader();renderWeek();renderWorkout();renderPlans();renderLibrary();renderProgress()}
+function renderStorageUsage(){
+  const host=$("storageUsage");if(!host)return;
+  const json=JSON.stringify(state),appBytes=new Blob([json]).size;
+  const photoBytes=(state.exercises||[]).reduce((sum,exercise)=>sum+dataUrlBinaryBytes(exercise.photo),0);
+  host.textContent=`App data: approximately ${formatBytes(appBytes)} · Photos: ${formatBytes(photoBytes)}. Large photos are optimized automatically.`;
+}
+function renderAll(){renderHeader();renderWeek();renderWorkout();renderPlans();renderLibrary();renderProgress();renderStorageUsage()}
 
 function clearExercisePhotoObjectUrl(){if(exercisePhotoObjectUrl){URL.revokeObjectURL(exercisePhotoObjectUrl);exercisePhotoObjectUrl=""}}
 function showExercisePhotoPreview(src=""){$("exercisePhotoPreview").src=src;$("exercisePhotoPreviewWrap").classList.toggle("hidden",!src)}
+function setExercisePhotoStatus(message="Large photos are automatically optimized before saving.",kind=""){
+  const status=$("exercisePhotoStatus");status.textContent=message;status.classList.toggle("working",kind==="working");status.classList.toggle("error",kind==="error");
+}
 function openExercise(ex=null){
-  clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;
+  clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;pendingExercisePhotoDataUrl=null;exercisePhotoCompressionPromise=null;exercisePhotoSelectionToken++;
   $("exerciseDialogTitle").textContent=ex?"Edit exercise":"Add exercise";$("exerciseId").value=ex?.id||"";$("exerciseName").value=ex?.name||"";$("exerciseCategory").value=ex?.category||"strength";
   setChoiceValues("exercisePrimaryMuscles","exercisePrimaryCustom",exercisePrimaryMuscles(ex));setChoiceValues("exerciseSecondaryMuscles","exerciseSecondaryCustom",exerciseSecondaryMuscles(ex));
-  $("exerciseEquipment").value=ex?.equipment||"";$("exerciseMovementType").value=ex?.movementType||"";$("exerciseLink").value=ex?.link||"";$("exerciseNotes").value=ex?.notes||"";$("exercisePhoto").value="";showExercisePhotoPreview(ex?.photo||"");showDialog("exerciseDialog");
+  $("exerciseEquipment").value=ex?.equipment||"";$("exerciseMovementType").value=ex?.movementType||"";$("exerciseLink").value=ex?.link||"";$("exerciseNotes").value=ex?.notes||"";$("exercisePhoto").value="";showExercisePhotoPreview(ex?.photo||"");setExercisePhotoStatus();showDialog("exerciseDialog");
 }
 function workoutUsedExerciseIds(){return new Set((workoutFor(selectedDate)?.items||[]).map(item=>item.exerciseId))}
 function availablePlanItems(plan,used=workoutUsedExerciseIds()){return (plan?.items||[]).filter(item=>!used.has(item.exerciseId))}
@@ -614,7 +633,12 @@ function syncModalLock(){
 
 document.querySelectorAll(".bottom-nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll(".bottom-nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));$(b.dataset.view).classList.add("active");renderAll()});
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>closeDialog(b.dataset.close));
-document.querySelectorAll("dialog").forEach(d=>d.addEventListener("close",()=>{if(d.id==="addWorkoutDialog")resetAddWorkoutDialog();if(d.id==="exerciseDialog")clearExercisePhotoObjectUrl();if(d.id==="removeWorkoutItemDialog")pendingWorkoutItemRemoval=null;syncModalLock()}));
+document.querySelectorAll("dialog").forEach(d=>d.addEventListener("close",()=>{
+  if(d.id==="addWorkoutDialog")resetAddWorkoutDialog();
+  if(d.id==="exerciseDialog"){exercisePhotoSelectionToken++;exercisePhotoCompressionPromise=null;pendingExercisePhotoDataUrl=null;clearExercisePhotoObjectUrl()}
+  if(d.id==="removeWorkoutItemDialog")pendingWorkoutItemRemoval=null;
+  syncModalLock();
+}));
 $("saveMetricsBtn").onclick=()=>{const weight=Number($("todayWeight").value),bodyFat=Number($("todayBodyFat").value);if(!weight||!bodyFat)return alert("Enter weight and body fat.");state.metrics[todayKey()]={weight,bodyFat};persist()};
 $("previousWeekBtn").onclick=()=>{weekOffset--;renderWeek()};$("nextWeekBtn").onclick=()=>{weekOffset++;renderWeek()};$("backThisWeekBtn").onclick=()=>{weekOffset=0;selectedDate=todayKey();renderAll()};
 $("openAddWorkoutBtn").onclick=()=>{resetAddWorkoutDialog();populateAddWorkout();setAddMode("plan");showDialog("addWorkoutDialog")};
@@ -633,14 +657,62 @@ $("addWorkoutForm").onsubmit=e=>{
   closeDialog("addWorkoutDialog");persist();
 };
 $("addExerciseBtn").onclick=()=>openExercise();
-$("exercisePhoto").onchange=e=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;const file=e.target.files[0];if(file){exercisePhotoObjectUrl=URL.createObjectURL(file);showExercisePhotoPreview(exercisePhotoObjectUrl)}else{const current=exById($("exerciseId").value);showExercisePhotoPreview(current?.photo||"")}};
-$("removeExercisePhotoBtn").onclick=()=>{clearExercisePhotoObjectUrl();removeExercisePhotoRequested=true;$("exercisePhoto").value="";showExercisePhotoPreview("")};
+$("exercisePhoto").onchange=e=>{
+  clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;pendingExercisePhotoDataUrl=null;
+  const file=e.target.files[0],current=exById($("exerciseId").value),token=++exercisePhotoSelectionToken;
+  if(!file){exercisePhotoCompressionPromise=null;showExercisePhotoPreview(current?.photo||"");setExercisePhotoStatus();return}
+  exercisePhotoObjectUrl=URL.createObjectURL(file);showExercisePhotoPreview(exercisePhotoObjectUrl);setExercisePhotoStatus("Preparing and optimizing photo…","working");
+  exercisePhotoCompressionPromise=(async()=>{
+    try{
+      const result=await compressPhotoFile(file);
+      if(token!==exercisePhotoSelectionToken)return false;
+      pendingExercisePhotoDataUrl=result.dataUrl;clearExercisePhotoObjectUrl();showExercisePhotoPreview(result.dataUrl);
+      const details=result.changed?`${formatBytes(result.originalBytes)} → ${formatBytes(result.compressedBytes)}`:formatBytes(result.compressedBytes);
+      setExercisePhotoStatus(`Photo ready (${details}).`);
+      return true;
+    }catch(error){
+      if(token!==exercisePhotoSelectionToken)return false;
+      console.error(error);pendingExercisePhotoDataUrl=null;clearExercisePhotoObjectUrl();$("exercisePhoto").value="";showExercisePhotoPreview(current?.photo||"");
+      setExercisePhotoStatus(error.message||"The photo could not be prepared.","error");
+      return false;
+    }
+  })();
+};
+$("removeExercisePhotoBtn").onclick=()=>{
+  exercisePhotoSelectionToken++;exercisePhotoCompressionPromise=null;pendingExercisePhotoDataUrl="";clearExercisePhotoObjectUrl();removeExercisePhotoRequested=true;$("exercisePhoto").value="";showExercisePhotoPreview("");setExercisePhotoStatus("Photo will be removed when you save.");
+};
 $("confirmRemoveWorkoutItemBtn").onclick=()=>{
   if(!pendingWorkoutItemRemoval)return closeDialog("removeWorkoutItemDialog");const pending=pendingWorkoutItemRemoval;applyWorkoutRemoval(pending);
   pendingWorkoutItemRemoval=null;closeDialog("removeWorkoutItemDialog");persist();
 };
 document.addEventListener("click",()=>closeItemMenus());
-$("exerciseForm").onsubmit=async e=>{e.preventDefault();const addAfterSave=e.submitter?.value==="save-add",id=$("exerciseId").value,name=$("exerciseName").value.trim();if(!name)return;const exact=state.exercises.some(x=>x.id!==id&&normalizeName(x.name)===normalizeName(name));if(exact)return alert("This exercise already exists.");const similar=similarName(name,id);if(similar&&!confirm(`A similar exercise already exists: ${similar.name}\n\nSave anyway?`))return;const old=id?exById(id):null;let photo=removeExercisePhotoRequested?"":(old?.photo||"");if($("exercisePhoto").files[0])photo=await fileToDataUrl($("exercisePhoto").files[0]);const primaryMuscles=readChoiceValues("exercisePrimaryMuscles","exercisePrimaryCustom"),primaryKeys=new Set(primaryMuscles.map(x=>x.toLowerCase())),secondaryMuscles=readChoiceValues("exerciseSecondaryMuscles","exerciseSecondaryCustom").filter(x=>!primaryKeys.has(x.toLowerCase()));const record={id:id||uid(),name,category:$("exerciseCategory").value,primaryMuscles,secondaryMuscles,equipment:$("exerciseEquipment").value,movementType:$("exerciseMovementType").value,muscle:primaryMuscles.join(", "),photo,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};if(id)state.exercises[state.exercises.findIndex(x=>x.id===id)]=record;else state.exercises.push(record);clearExercisePhotoObjectUrl();closeDialog("exerciseDialog");persist();if(addAfterSave)requestAnimationFrame(()=>openAddTo(exById(record.id)))};
+$("exerciseForm").onsubmit=async e=>{
+  e.preventDefault();
+  const addAfterSave=e.submitter?.value==="save-add",id=$("exerciseId").value,name=$("exerciseName").value.trim();
+  if(!name)return;
+  const exact=state.exercises.some(x=>x.id!==id&&normalizeName(x.name)===normalizeName(name));
+  if(exact)return alert("This exercise already exists.");
+  const similar=similarName(name,id);
+  if(similar&&!confirm(`A similar exercise already exists: ${similar.name}\n\nSave anyway?`))return;
+  if(exercisePhotoCompressionPromise){
+    setExercisePhotoStatus("Finishing photo preparation…","working");
+    const ready=await exercisePhotoCompressionPromise;
+    if(!ready)return;
+  }
+  const old=id?exById(id):null;
+  const photo=removeExercisePhotoRequested?"":(pendingExercisePhotoDataUrl!==null?pendingExercisePhotoDataUrl:(old?.photo||""));
+  const primaryMuscles=readChoiceValues("exercisePrimaryMuscles","exercisePrimaryCustom"),primaryKeys=new Set(primaryMuscles.map(x=>x.toLowerCase())),secondaryMuscles=readChoiceValues("exerciseSecondaryMuscles","exerciseSecondaryCustom").filter(x=>!primaryKeys.has(x.toLowerCase()));
+  const record={id:id||uid(),name,category:$("exerciseCategory").value,primaryMuscles,secondaryMuscles,equipment:$("exerciseEquipment").value,movementType:$("exerciseMovementType").value,muscle:primaryMuscles.join(", "),photo,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};
+  const index=id?state.exercises.findIndex(x=>x.id===id):-1;
+  if(index>=0)state.exercises[index]=record;else state.exercises.push(record);
+  if(!persist()){
+    if(index>=0)state.exercises[index]=old;else state.exercises.pop();
+    setExercisePhotoStatus("The exercise could not be saved because browser storage is full.","error");
+    return;
+  }
+  clearExercisePhotoObjectUrl();closeDialog("exerciseDialog");
+  if(addAfterSave)requestAnimationFrame(()=>openAddTo(exById(record.id)));
+};
 document.querySelectorAll('input[name="addToTarget"]').forEach(input=>input.onchange=updateAddToTarget);
 $("addToPlanSelect").onchange=updateAddToStatus;$("addToNewPlanName").oninput=updateAddToStatus;$("addToCardioIntervalBtn").onclick=()=>{addToIntervalDraft.push(addToIntervalDraft.at(-1)||10);renderAddToIntervals()};
 $("addToForm").onsubmit=e=>{e.preventDefault();const ex=exById($("addToExerciseId").value),target=selectedAddToTarget();if(!ex)return alert("Exercise not found.");const options=addToFormOptions(ex);if(target==="today"){if(!addActivityToSession(ex,todayKey(),options))return alert("Exercise already added to today’s workout.")}else if(target==="existing-plan"){const plan=planById($("addToPlanSelect").value);if(!plan)return alert("No available plan.");plan.items ||= [];if(plan.items.some(item=>item.exerciseId===ex.id))return alert("Exercise already added to this plan.");plan.items.push(createPlanItem(ex,options))}else{const name=$("addToNewPlanName").value.trim();if(!name)return alert("Enter a plan name.");state.plans.push({id:uid(),name,notes:"",intendedFocus:[],items:[createPlanItem(ex,options)]})}closeDialog("addToDialog");persist()};
@@ -663,6 +735,39 @@ $("teacherExportForm").onsubmit=event=>{
     console.error(error);$("teacherExportStatus").textContent="Spreadsheet export failed. Please try again.";
   }
 };
-$("exportBackupBtn").onclick=()=>downloadBackup(state);$("restoreBackupInput").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const restored=JSON.parse(await f.text());saveState(restored);state=loadState();renderAll();alert("Backup restored.")}catch{alert("Invalid backup file.")}};$("clearDataBtn").onclick=()=>{if(confirm("Clear all local data?")){state=makeDefaultState();saveState(state);selectedDate=todayKey();weekOffset=0;renderAll()}};
+$("exportBackupBtn").onclick=()=>downloadBackup(state);
+$("restoreBackupInput").onchange=async e=>{
+  const input=e.target,f=input.files[0];if(!f)return;
+  let restored;
+  try{
+    restored=JSON.parse(await f.text());
+    if(!restored||typeof restored!=="object"||!Array.isArray(restored.exercises))throw new Error("Invalid structure");
+  }catch{
+    input.value="";alert("Invalid backup file. The JSON file could not be read.");return;
+  }
+  try{
+    const result=await compressStatePhotos(restored);
+    saveState(restored);state=loadState();renderAll();input.value="";
+    const note=result.optimized?` ${result.optimized} large photo${result.optimized===1?" was":"s were"} optimized, saving ${formatBytes(result.savedBytes)}.`:"";
+    alert(`Backup restored.${note}`);
+  }catch(error){
+    console.error(error);input.value="";
+    alert(error?.name==="StorageFullError"?storageErrorMessage(error):(error?.message||"A photo in this backup could not be prepared."));
+  }
+};
+$("clearDataBtn").onclick=()=>{if(confirm("Clear all local data?")){state=makeDefaultState();saveState(state);selectedDate=todayKey();weekOffset=0;renderAll()}};
 if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
-renderAll();
+async function initializeApp(){
+  try{
+    const result=await compressStatePhotos(state);
+    if(result.optimized){
+      saveState(state);
+      setTimeout(()=>alert(`${result.optimized} large existing photo${result.optimized===1?" was":"s were"} optimized automatically, freeing ${formatBytes(result.savedBytes)}.`),0);
+    }
+  }catch(error){
+    console.error(error);
+    setTimeout(()=>alert(error?.message||"An existing photo could not be optimized."),0);
+  }
+  renderAll();
+}
+initializeApp();

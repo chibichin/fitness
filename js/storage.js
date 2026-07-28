@@ -70,7 +70,20 @@ export function loadState(){
     return s;
   }catch{return makeDefaultState()}
 }
-export function saveState(s){localStorage.setItem(KEY,JSON.stringify(s))}
+export function isStorageFullError(error){
+  return error?.name==="QuotaExceededError"||error?.name==="NS_ERROR_DOM_QUOTA_REACHED"||error?.code===22||error?.code===1014;
+}
+export function saveState(s){
+  try{localStorage.setItem(KEY,JSON.stringify(s))}
+  catch(error){
+    if(isStorageFullError(error)){
+      const storageError=new Error("Photo storage is full. Export a backup and optimize large photos before adding more.");
+      storageError.name="StorageFullError";
+      throw storageError;
+    }
+    throw error;
+  }
+}
 export function downloadBackup(s){
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([JSON.stringify(s,null,2)],{type:"application/json"}));

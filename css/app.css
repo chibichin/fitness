@@ -45,3 +45,6 @@ dialog{border:0;border-radius:18px;padding:0;width:min(92vw,480px);max-height:90
 /* v1.4.4 whole-panel controls and reliable exercise menus */
 .workout-section-top{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;background:var(--soft)}.workout-section-top .workout-section-header{width:auto;background:transparent;padding-right:8px}.workout-section-top>.remove-panel-from-workout{margin:7px 7px 7px 0;padding:7px 9px;font-size:12px}.plan-item-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:9px}.plan-item-copy{min-width:0}.plan-item-copy strong{overflow-wrap:anywhere}.plan-item-row .remove-plan-item{padding:8px 10px}.item-menu:not(.hidden)+.item-body{margin-top:4px}
 @media(max-width:420px){.workout-section-top>.remove-panel-from-workout{padding:7px 6px}.item-actions{gap:6px}.item-actions .reference{margin-right:0}.plan-item-row{gap:6px}.plan-item-row .remove-plan-item{padding:8px 7px;font-size:12px}}
+
+/* v1.4.5 automatic photo compression */
+.photo-status{margin:0;min-height:18px}.photo-status.working{color:#374151}.photo-status.error{color:var(--danger)}#storageUsage{line-height:1.45}
