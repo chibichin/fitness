@@ -48,3 +48,7 @@ dialog{border:0;border-radius:18px;padding:0;width:min(92vw,480px);max-height:90
 
 /* v1.4.5 automatic photo compression */
 .photo-status{margin:0;min-height:18px}.photo-status.working{color:#374151}.photo-status.error{color:var(--danger)}#storageUsage{line-height:1.45}
+
+/* v1.4.6 reliable touch reordering */
+.drag-handle{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:grab;min-width:42px;padding:8px 10px;color:var(--muted);font-size:20px;line-height:1}.drag-handle:active{cursor:grabbing}.reordering{user-select:none;-webkit-user-select:none}.reorder-dragging{opacity:.94;box-shadow:0 14px 32px rgba(17,24,39,.24)!important;background:#fff;will-change:transform}.reorder-placeholder{border:2px dashed #9ca3af;border-radius:14px;background:#f3f4f6;min-height:42px}.reorder-active>.completed-label{display:none}.item-title-with-drag{display:flex;align-items:flex-start;gap:7px;min-width:0}.item-title-with-drag>div{min-width:0}.workout-section-top{grid-template-columns:auto minmax(0,1fr) auto}.workout-section-top>.panel-drag-handle{margin:7px 0 7px 7px}.workout-section-top .workout-section-header{padding-left:7px}.plan-item-row{grid-template-columns:auto minmax(0,1fr) auto}.plan-item-drag-handle{align-self:stretch}
+@media(max-width:420px){.drag-handle{min-width:38px;padding:7px 8px}.item-title-with-drag{gap:5px}.workout-section-top>.panel-drag-handle{margin-left:5px}}

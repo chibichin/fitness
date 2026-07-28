@@ -1,6 +1,7 @@
 import {loadState,saveState,makeDefaultState,downloadBackup,uid} from "./storage.js";
 import {downloadTeacherWorkbook} from "./xlsx.js";
 import {compressPhotoFile,compressStatePhotos,dataUrlBinaryBytes,formatBytes} from "./photo.js";
+import {enableReorder} from "./reorder.js";
 
 let state=loadState();
 let selectedDate=todayKey();
@@ -175,6 +176,21 @@ function workoutGroups(w){
   }
   return groups;
 }
+function reorderWorkoutGroups(groupKeys){
+  const workout=workoutFor(selectedDate),groups=workoutGroups(workout),byKey=new Map(groups.map(group=>[group.key,group]));
+  const ordered=groupKeys.map(key=>byKey.get(key)).filter(Boolean);
+  groups.filter(group=>!groupKeys.includes(group.key)).forEach(group=>ordered.push(group));
+  workout.items=ordered.flatMap(group=>group.items);
+  persist();
+}
+function reorderWorkoutGroupItems(groupKey,itemIds){
+  const workout=workoutFor(selectedDate),groups=workoutGroups(workout),group=groups.find(entry=>entry.key===groupKey);
+  if(!group)return;
+  const byId=new Map(group.items.map(item=>[item.id,item]));
+  group.items=itemIds.map(id=>byId.get(id)).filter(Boolean);
+  workout.items=groups.flatMap(entry=>entry.key===groupKey?group.items:entry.items);
+  persist();
+}
 function renderTodayMuscleFocus(w){
   const host=$("todayMuscleFocus");
   if(!w?.items?.length){host.innerHTML="";host.classList.add("hidden");return}
@@ -187,10 +203,11 @@ function renderWorkout(){
   if(!w?.items?.length){host.innerHTML='<p class="muted">No workout planned for this date.</p>';return}
   for(const group of workoutGroups(w)){
     const entries=group.items,doneCount=entries.filter(isDone).length;
-    const section=document.createElement("section");section.className="workout-section";
+    const section=document.createElement("section");section.className="workout-section";section.dataset.groupKey=group.key;
     const header=document.createElement("button");header.className="workout-section-header";
     header.innerHTML=`<span><b>${escapeHtml(group.title)}</b><small>${doneCount}/${entries.length} complete</small></span><b>⌄</b>`;
     const top=document.createElement("div");top.className="workout-section-top";
+    const panelHandle=document.createElement("button");panelHandle.type="button";panelHandle.className="secondary drag-handle panel-drag-handle";panelHandle.textContent="⠿";panelHandle.setAttribute("aria-label",`Reorder ${group.title} panel`);panelHandle.title="Hold and drag to reorder; arrow keys also work";top.appendChild(panelHandle);
     top.appendChild(header);
     const remove=document.createElement("button");remove.type="button";remove.className="secondary remove-panel-from-workout";remove.textContent="Remove";remove.setAttribute("aria-label",`Remove ${group.title} panel from workout`);remove.onclick=()=>openRemoveWorkoutGroup(group);top.appendChild(remove);
     const body=document.createElement("div");body.className="workout-section-body";
@@ -202,10 +219,12 @@ function renderWorkout(){
     let divider=false;
     for(const item of entries){
       if(isDone(item)&&!divider){const d=document.createElement("div");d.className="completed-label";d.textContent="Completed";body.appendChild(d);divider=true}
-      body.appendChild(renderWorkoutItem(item));
+      const card=renderWorkoutItem(item);card.dataset.itemId=item.id;body.appendChild(card);
     }
     section.append(top,body);host.appendChild(section);
+    enableReorder({container:body,itemSelector:".workout-item",handleSelector:".exercise-drag-handle",idAttribute:"itemId",onCommit:ids=>reorderWorkoutGroupItems(group.key,ids)});
   }
+  enableReorder({container:host,itemSelector:".workout-section",handleSelector:".panel-drag-handle",idAttribute:"groupKey",onCommit:reorderWorkoutGroups});
 }
 function closeItemMenus(except=null){document.querySelectorAll(".item-menu").forEach(menu=>{if(menu!==except){menu.classList.add("hidden");menu.closest(".workout-item")?.querySelector(".more")?.setAttribute("aria-expanded","false")}})}
 function openRemoveWorkoutItem(item){
@@ -230,7 +249,7 @@ function applyWorkoutRemoval(pending){
 function renderWorkoutItem(item){
   const ex=exById(item.exerciseId),displayName=ex?.name||item.exerciseName||"Exercise",card=document.createElement("div");card.className="workout-item"+(isDone(item)?" completed":"");
   const setActions=item.type==="cardio"?"":'<button class="secondary add-set-action" type="button">Add set</button><button class="secondary remove-set-action" type="button">Remove last set</button>';
-  card.innerHTML=`<div class="item-head"><div><strong>${escapeHtml(displayName)}</strong><div class="muted">${labels[itemCategory(item)]}</div></div><div class="item-actions"><button class="secondary reference" type="button">Ref</button><button class="secondary more" type="button" aria-label="Exercise actions" aria-expanded="false">⋯</button></div></div><div class="item-menu hidden">${setActions}<button class="danger remove-exercise-action" type="button">Remove exercise</button></div><div class="item-body"></div>`;
+  card.innerHTML=`<div class="item-head"><div class="item-title-with-drag"><button type="button" class="secondary drag-handle exercise-drag-handle" aria-label="Reorder ${escapeHtml(displayName)}" title="Hold and drag to reorder; arrow keys also work">⠿</button><div><strong>${escapeHtml(displayName)}</strong><div class="muted">${labels[itemCategory(item)]}</div></div></div><div class="item-actions"><button class="secondary reference" type="button">Ref</button><button class="secondary more" type="button" aria-label="Exercise actions" aria-expanded="false">⋯</button></div></div><div class="item-menu hidden">${setActions}<button class="danger remove-exercise-action" type="button">Remove exercise</button></div><div class="item-body"></div>`;
   const menu=card.querySelector(".item-menu"),more=card.querySelector(".more");
   more.onclick=e=>{e.stopPropagation();const willOpen=menu.classList.contains("hidden");closeItemMenus(menu);menu.classList.toggle("hidden",!willOpen);more.setAttribute("aria-expanded",String(willOpen))};
   menu.onclick=e=>e.stopPropagation();
@@ -327,9 +346,10 @@ function renderPlanDraft(){
   const host=$("planItemsList");
   host.innerHTML=(planDraft.items||[]).map(x=>{
     const ex=exById(x.exerciseId),summary=x.type==="cardio"?`${(x.intervals||[]).join(" / ")} min`:`${x.sets} × ${x.reps}`;
-    return `<div class="plan-item"><div class="plan-item-row"><div class="plan-item-copy"><strong>${escapeHtml(ex?.name||x.exerciseName||"Exercise")}</strong><div class="muted">${labels[x.category||ex?.category||"strength"]} · ${escapeHtml(summary)}</div></div><button type="button" class="secondary remove-plan-item" data-id="${escapeHtml(x.id)}">Remove</button></div></div>`;
+    return `<div class="plan-item" data-item-id="${escapeHtml(x.id)}"><div class="plan-item-row"><button type="button" class="secondary drag-handle plan-item-drag-handle" aria-label="Reorder ${escapeHtml(ex?.name||x.exerciseName||"Exercise")}" title="Hold and drag to reorder; arrow keys also work">⠿</button><div class="plan-item-copy"><strong>${escapeHtml(ex?.name||x.exerciseName||"Exercise")}</strong><div class="muted">${labels[x.category||ex?.category||"strength"]} · ${escapeHtml(summary)}</div></div><button type="button" class="secondary remove-plan-item" data-id="${escapeHtml(x.id)}">Remove</button></div></div>`;
   }).join("")||'<p class="muted">No items.</p>';
   host.querySelectorAll(".remove-plan-item").forEach(b=>b.onclick=()=>{planDraft.items=planDraft.items.filter(x=>x.id!==b.dataset.id);renderPlanDraft();populatePlanExerciseOptions()});
+  enableReorder({container:host,itemSelector:".plan-item",handleSelector:".plan-item-drag-handle",idAttribute:"itemId",onCommit:ids=>{const byId=new Map(planDraft.items.map(item=>[item.id,item]));planDraft.items=ids.map(id=>byId.get(id)).filter(Boolean)}});
   renderPlanCalculatedFocus();
 }
 function addCurrentPlanItem(){
