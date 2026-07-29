@@ -1,6 +1,7 @@
 import {loadState,saveState,makeDefaultState,downloadBackup,uid} from "./storage.js";
 import {downloadTeacherWorkbook} from "./xlsx.js";
-import {compressPhotoFile,compressStatePhotos,dataUrlBinaryBytes,formatBytes} from "./photo.js";
+import {compressPhotoFile,compressPhotoDataUrl,formatBytes} from "./photo.js";
+import {putPhoto,getAllPhotos,deletePhoto,clearPhotos,replaceAllPhotos,photoStorageStats,blobToDataUrl,requestPersistentPhotoStorage} from "./photo-store.js";
 import {enableReorder} from "./reorder.js";
 
 let state=loadState();
@@ -12,9 +13,10 @@ let addToIntervalDraft=[10,10];
 let pendingWorkoutItemRemoval=null;
 let exercisePhotoObjectUrl="";
 let removeExercisePhotoRequested=false;
-let pendingExercisePhotoDataUrl=null;
+let pendingExercisePhotoBlob=null;
 let exercisePhotoCompressionPromise=null;
 let exercisePhotoSelectionToken=0;
+const exercisePhotoUrls=new Map();
 let addWorkoutPlanId="";
 let addWorkoutPlanSelection=new Set();
 let addWorkoutExerciseSelection=new Set();
@@ -31,11 +33,24 @@ function keyFromDate(d){return localDateKey(d)}
 function prettyDate(key){return new Intl.DateTimeFormat("en-US",{weekday:"long",month:"long",day:"numeric"}).format(new Date(key+"T12:00:00"))}
 function exById(id){return state.exercises.find(x=>x.id===id)}
 function planById(id){return state.plans.find(x=>x.id===id)}
+function exercisePhotoUrl(ex){return ex?.photoId?exercisePhotoUrls.get(ex.photoId)||"":ex?.photo||""}
+function setExercisePhotoUrl(id,blob){
+  const previous=exercisePhotoUrls.get(id);
+  if(previous)URL.revokeObjectURL(previous);
+  if(blob)exercisePhotoUrls.set(id,URL.createObjectURL(blob));
+  else exercisePhotoUrls.delete(id);
+}
+async function refreshExercisePhotoUrls(){
+  for(const url of exercisePhotoUrls.values())URL.revokeObjectURL(url);
+  exercisePhotoUrls.clear();
+  for(const record of await getAllPhotos())if(record?.id&&record.blob)setExercisePhotoUrl(record.id,record.blob);
+}
 function activeExercises(category){return state.exercises.filter(x=>!x.archived&&(!category||x.category===category))}
 function itemCategory(item){return item.category||exById(item.exerciseId)?.category||"strength"}
 function isDone(item){return item.type==="cardio"?(item.intervals?.length>0&&item.intervals.every(x=>x.done)):(item.sets?.length>0&&item.sets.every(x=>x.done))}
 function storageErrorMessage(error){
-  if(error?.name==="StorageFullError")return "Photo storage is full. Export a backup, then optimize or remove a large photo before adding more.";
+  if(error?.name==="StorageFullError")return "App data storage is full. Export a backup before making more changes.";
+  if(error?.name==="QuotaExceededError")return "Photo storage is full on this device. Export a full backup before removing photos.";
   return "This change could not be saved. Please export a backup and try again.";
 }
 function persist(){
@@ -181,7 +196,7 @@ function reorderWorkoutGroups(groupKeys){
   const ordered=groupKeys.map(key=>byKey.get(key)).filter(Boolean);
   groups.filter(group=>!groupKeys.includes(group.key)).forEach(group=>ordered.push(group));
   workout.items=ordered.flatMap(group=>group.items);
-  persist();
+  try{saveState(state)}catch(error){console.error(error);alert(storageErrorMessage(error))}
 }
 function reorderWorkoutGroupItems(groupKey,itemIds){
   const workout=workoutFor(selectedDate),groups=workoutGroups(workout),group=groups.find(entry=>entry.key===groupKey);
@@ -189,7 +204,7 @@ function reorderWorkoutGroupItems(groupKey,itemIds){
   const byId=new Map(group.items.map(item=>[item.id,item]));
   group.items=itemIds.map(id=>byId.get(id)).filter(Boolean);
   workout.items=groups.flatMap(entry=>entry.key===groupKey?group.items:entry.items);
-  persist();
+  try{saveState(state)}catch(error){console.error(error);alert(storageErrorMessage(error))}
 }
 function renderTodayMuscleFocus(w){
   const host=$("todayMuscleFocus");
@@ -215,7 +230,11 @@ function renderWorkout(){
     let open=localStorage.getItem(storageKey)!=="false";
     if(doneCount===entries.length)open=false;
     body.classList.toggle("hidden",!open);
-    header.onclick=()=>{open=!open;body.classList.toggle("hidden",!open);localStorage.setItem(storageKey,String(open))};
+    header.onclick=()=>{
+      const nextOpen=body.classList.contains("hidden");
+      body.classList.toggle("hidden",!nextOpen);
+      localStorage.setItem(storageKey,String(nextOpen));
+    };
     let divider=false;
     for(const item of entries){
       if(isDone(item)&&!divider){const d=document.createElement("div");d.className="completed-label";d.textContent="Completed";body.appendChild(d);divider=true}
@@ -296,11 +315,16 @@ function renderWorkoutItem(item){
 }
 function showReference(ex){
   $("referenceTitle").textContent=ex?.name||"Reference";
-  $("referenceImage").classList.toggle("hidden",!ex?.photo);$("referenceImage").src=ex?.photo||"";
+  const photoUrl=exercisePhotoUrl(ex);
+  $("referenceImage").src=photoUrl;
+  $("referenceImageViewport").classList.remove("zoomed");
+  $("referenceImageViewport").classList.toggle("hidden",!photoUrl);
+  $("referenceZoomBtn").classList.toggle("hidden",!photoUrl);
+  $("referenceZoomBtn").textContent="View full-size photo";
   const meta=exerciseMetaHtml(ex);$("referenceMuscleMeta").innerHTML=meta;$("referenceMuscleMeta").classList.toggle("hidden",!meta);
   $("referenceNotes").classList.toggle("hidden",!ex?.notes);$("referenceNotes").textContent=ex?.notes||"";
   $("referenceLink").classList.toggle("hidden",!ex?.link);$("referenceLink").href=ex?.link||"#";
-  $("referenceEmpty").classList.toggle("hidden",Boolean(ex?.photo||meta||ex?.notes||ex?.link));
+  $("referenceEmpty").classList.toggle("hidden",Boolean(photoUrl||meta||ex?.notes||ex?.link));
   showDialog("referenceDialog");
 }
 
@@ -435,8 +459,8 @@ function renderLibrary(){
     });
     if(!list.length)continue;
     const sec=document.createElement("section");sec.className="library-section";sec.innerHTML=`<h3>${labels[category]} (${list.length})</h3>`;
-    for(const ex of list){const card=document.createElement("article");card.className="list-card";const meta=exerciseMetaHtml(ex);
-      card.innerHTML=`<strong>${escapeHtml(ex.name)}</strong>${meta?`<div class="exercise-meta">${meta}</div>`:'<p class="muted">No muscle details</p>'}${ex.photo?`<img src="${ex.photo}" class="reference-photo" alt="">`:""}${ex.notes?`<p>${escapeHtml(ex.notes)}</p>`:""}${ex.link?`<a href="${escapeHtml(ex.link)}" target="_blank" rel="noopener">Open reference</a>`:""}<div class="actions library-actions"><button class="add-to-exercise">Add to…</button><button class="secondary edit-exercise">Edit</button><button class="danger delete-exercise">Delete</button></div>`;
+    for(const ex of list){const card=document.createElement("article");card.className="list-card";const meta=exerciseMetaHtml(ex),photoUrl=exercisePhotoUrl(ex);
+      card.innerHTML=`<strong>${escapeHtml(ex.name)}</strong>${meta?`<div class="exercise-meta">${meta}</div>`:'<p class="muted">No muscle details</p>'}${photoUrl?`<img src="${photoUrl}" class="reference-photo" alt="">`:""}${ex.notes?`<p>${escapeHtml(ex.notes)}</p>`:""}${ex.link?`<a href="${escapeHtml(ex.link)}" target="_blank" rel="noopener">Open reference</a>`:""}<div class="actions library-actions"><button class="add-to-exercise">Add to…</button><button class="secondary edit-exercise">Edit</button><button class="danger delete-exercise">Delete</button></div>`;
       card.querySelector(".add-to-exercise").onclick=()=>openAddTo(ex);
       card.querySelector(".edit-exercise").onclick=()=>openExercise(ex);
       card.querySelector(".delete-exercise").onclick=()=>deleteExercise(ex);
@@ -446,11 +470,15 @@ function renderLibrary(){
   }
   if(!host.children.length)host.innerHTML='<article class="card"><p class="muted">No matching exercises.</p></article>';
 }
-function deleteExercise(ex){
+async function deleteExercise(ex){
   const planCount=state.plans.filter(p=>(p.items||[]).some(i=>i.exerciseId===ex.id)).length;
   const workoutCount=Object.values(state.workouts).filter(w=>(w.items||[]).some(i=>i.exerciseId===ex.id)).length;
   const detail=(planCount||workoutCount)?`\n\nUsed in ${planCount} plan(s) and ${workoutCount} workout date(s). Workout history will keep the exercise name.`:"";
   if(!confirm(`Delete "${ex.name}"?${detail}`))return;
+  if(ex.photoId){
+    try{await deletePhoto(ex.photoId);setExercisePhotoUrl(ex.photoId,null)}
+    catch(error){console.error(error);return alert("The exercise was not deleted because its saved photo could not be removed.")}
+  }
   state.plans.forEach(p=>{p.items=(p.items||[]).filter(i=>i.exerciseId!==ex.id)});
   Object.values(state.workouts).forEach(w=>(w.items||[]).forEach(i=>{if(i.exerciseId===ex.id)i.exerciseName ||= ex.name}));
   state.exercises=state.exercises.filter(x=>x.id!==ex.id);persist();
@@ -552,24 +580,97 @@ function openTeacherExport(){
   updateTeacherExportStatus();showDialog("teacherExportDialog");
 }
 
-function renderStorageUsage(){
+async function renderStorageUsage(){
   const host=$("storageUsage");if(!host)return;
   const json=JSON.stringify(state),appBytes=new Blob([json]).size;
-  const photoBytes=(state.exercises||[]).reduce((sum,exercise)=>sum+dataUrlBinaryBytes(exercise.photo),0);
-  host.textContent=`App data: approximately ${formatBytes(appBytes)} · Photos: ${formatBytes(photoBytes)}. Large photos are optimized automatically.`;
+  try{
+    const photos=await photoStorageStats();
+    host.textContent=`App data: approximately ${formatBytes(appBytes)} · ${photos.count} saved photo${photos.count===1?"":"s"}: ${formatBytes(photos.bytes)}. Photos are stored separately from app data.`;
+  }catch{
+    host.textContent=`App data: approximately ${formatBytes(appBytes)}. Photo storage is temporarily unavailable.`;
+  }
 }
+
+function downloadJsonFile(value,filename){
+  const link=document.createElement("a");
+  link.href=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:"application/json"}));
+  link.download=filename;
+  link.click();
+  setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+}
+
+async function downloadFullBackup(){
+  const button=$("exportFullBackupBtn");
+  button.disabled=true;button.textContent="Preparing photos…";
+  try{
+    const backup=structuredClone(state),photos=new Map((await getAllPhotos()).map(record=>[record.id,record]));
+    backup.version="1.4.7";
+    backup.backupType="full";
+    for(const exercise of backup.exercises||[]){
+      const record=exercise.photoId?photos.get(exercise.photoId):null;
+      exercise.photo=record?.blob?await blobToDataUrl(record.blob):String(exercise.photo||"");
+    }
+    downloadJsonFile(backup,`fitness-full-backup-${new Date().toISOString().slice(0,10)}.json`);
+  }catch(error){
+    console.error(error);
+    alert("The full backup could not be prepared. Please try again.");
+  }finally{
+    button.disabled=false;button.textContent="Export full backup (with photos)";
+  }
+}
+
+async function prepareRestoredBackup(restored){
+  const prepared=structuredClone(restored),photoEntries=[];
+  let originalBytes=0,storedBytes=0;
+  prepared.version="1.4.7";
+  delete prepared.backupType;
+  for(const exercise of prepared.exercises||[]){
+    const legacyPhoto=String(exercise.photo||"");
+    exercise.photo="";
+    exercise.photoId="";
+    if(!legacyPhoto.startsWith("data:image/"))continue;
+    const result=await compressPhotoDataUrl(legacyPhoto);
+    photoEntries.push({id:exercise.id,blob:result.blob});
+    exercise.photoId=exercise.id;
+    originalBytes+=result.originalBytes;
+    storedBytes+=result.compressedBytes;
+  }
+  await replaceAllPhotos(photoEntries);
+  saveState(prepared);
+  state=loadState();
+  await refreshExercisePhotoUrls();
+  return {count:photoEntries.length,originalBytes,storedBytes};
+}
+
+async function migrateLegacyPhotos(){
+  let migrated=0,originalBytes=0,storedBytes=0;
+  for(const exercise of state.exercises||[]){
+    const legacyPhoto=String(exercise.photo||"");
+    if(!legacyPhoto.startsWith("data:image/"))continue;
+    const result=await compressPhotoDataUrl(legacyPhoto);
+    await putPhoto(exercise.id,result.blob);
+    exercise.photoId=exercise.id;
+    exercise.photo="";
+    saveState(state);
+    migrated++;
+    originalBytes+=result.originalBytes;
+    storedBytes+=result.compressedBytes;
+  }
+  return {migrated,originalBytes,storedBytes};
+}
+
 function renderAll(){renderHeader();renderWeek();renderWorkout();renderPlans();renderLibrary();renderProgress();renderStorageUsage()}
 
 function clearExercisePhotoObjectUrl(){if(exercisePhotoObjectUrl){URL.revokeObjectURL(exercisePhotoObjectUrl);exercisePhotoObjectUrl=""}}
 function showExercisePhotoPreview(src=""){$("exercisePhotoPreview").src=src;$("exercisePhotoPreviewWrap").classList.toggle("hidden",!src)}
-function setExercisePhotoStatus(message="Large photos are automatically optimized before saving.",kind=""){
+function setExercisePhotoStatus(message="Photos are optimized for readable text and stored separately from app data.",kind=""){
   const status=$("exercisePhotoStatus");status.textContent=message;status.classList.toggle("working",kind==="working");status.classList.toggle("error",kind==="error");
 }
 function openExercise(ex=null){
-  clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;pendingExercisePhotoDataUrl=null;exercisePhotoCompressionPromise=null;exercisePhotoSelectionToken++;
+  clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;pendingExercisePhotoBlob=null;exercisePhotoCompressionPromise=null;exercisePhotoSelectionToken++;
   $("exerciseDialogTitle").textContent=ex?"Edit exercise":"Add exercise";$("exerciseId").value=ex?.id||"";$("exerciseName").value=ex?.name||"";$("exerciseCategory").value=ex?.category||"strength";
   setChoiceValues("exercisePrimaryMuscles","exercisePrimaryCustom",exercisePrimaryMuscles(ex));setChoiceValues("exerciseSecondaryMuscles","exerciseSecondaryCustom",exerciseSecondaryMuscles(ex));
-  $("exerciseEquipment").value=ex?.equipment||"";$("exerciseMovementType").value=ex?.movementType||"";$("exerciseLink").value=ex?.link||"";$("exerciseNotes").value=ex?.notes||"";$("exercisePhoto").value="";showExercisePhotoPreview(ex?.photo||"");setExercisePhotoStatus();showDialog("exerciseDialog");
+  $("exerciseEquipment").value=ex?.equipment||"";$("exerciseMovementType").value=ex?.movementType||"";$("exerciseLink").value=ex?.link||"";$("exerciseNotes").value=ex?.notes||"";$("exercisePhoto").value="";showExercisePhotoPreview(exercisePhotoUrl(ex));setExercisePhotoStatus();showDialog("exerciseDialog");
 }
 function workoutUsedExerciseIds(){return new Set((workoutFor(selectedDate)?.items||[]).map(item=>item.exerciseId))}
 function availablePlanItems(plan,used=workoutUsedExerciseIds()){return (plan?.items||[]).filter(item=>!used.has(item.exerciseId))}
@@ -652,10 +753,15 @@ function syncModalLock(){
 }
 
 document.querySelectorAll(".bottom-nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll(".bottom-nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));$(b.dataset.view).classList.add("active");renderAll()});
+$("referenceZoomBtn").onclick=()=>{
+  const viewport=$("referenceImageViewport"),zoomed=viewport.classList.toggle("zoomed");
+  $("referenceZoomBtn").textContent=zoomed?"Fit photo to screen":"View full-size photo";
+  if(!zoomed){viewport.scrollTop=0;viewport.scrollLeft=0}
+};
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>closeDialog(b.dataset.close));
 document.querySelectorAll("dialog").forEach(d=>d.addEventListener("close",()=>{
   if(d.id==="addWorkoutDialog")resetAddWorkoutDialog();
-  if(d.id==="exerciseDialog"){exercisePhotoSelectionToken++;exercisePhotoCompressionPromise=null;pendingExercisePhotoDataUrl=null;clearExercisePhotoObjectUrl()}
+  if(d.id==="exerciseDialog"){exercisePhotoSelectionToken++;exercisePhotoCompressionPromise=null;pendingExercisePhotoBlob=null;clearExercisePhotoObjectUrl()}
   if(d.id==="removeWorkoutItemDialog")pendingWorkoutItemRemoval=null;
   syncModalLock();
 }));
@@ -678,28 +784,28 @@ $("addWorkoutForm").onsubmit=e=>{
 };
 $("addExerciseBtn").onclick=()=>openExercise();
 $("exercisePhoto").onchange=e=>{
-  clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;pendingExercisePhotoDataUrl=null;
+  clearExercisePhotoObjectUrl();removeExercisePhotoRequested=false;pendingExercisePhotoBlob=null;
   const file=e.target.files[0],current=exById($("exerciseId").value),token=++exercisePhotoSelectionToken;
-  if(!file){exercisePhotoCompressionPromise=null;showExercisePhotoPreview(current?.photo||"");setExercisePhotoStatus();return}
+  if(!file){exercisePhotoCompressionPromise=null;showExercisePhotoPreview(exercisePhotoUrl(current));setExercisePhotoStatus();return}
   exercisePhotoObjectUrl=URL.createObjectURL(file);showExercisePhotoPreview(exercisePhotoObjectUrl);setExercisePhotoStatus("Preparing and optimizing photo…","working");
   exercisePhotoCompressionPromise=(async()=>{
     try{
       const result=await compressPhotoFile(file);
       if(token!==exercisePhotoSelectionToken)return false;
-      pendingExercisePhotoDataUrl=result.dataUrl;clearExercisePhotoObjectUrl();showExercisePhotoPreview(result.dataUrl);
+      pendingExercisePhotoBlob=result.blob;clearExercisePhotoObjectUrl();exercisePhotoObjectUrl=URL.createObjectURL(result.blob);showExercisePhotoPreview(exercisePhotoObjectUrl);
       const details=result.changed?`${formatBytes(result.originalBytes)} → ${formatBytes(result.compressedBytes)}`:formatBytes(result.compressedBytes);
-      setExercisePhotoStatus(`Photo ready (${details}).`);
+      setExercisePhotoStatus(`Photo ready (${details}, ${result.width} × ${result.height}). Text-quality detail is preserved.`);
       return true;
     }catch(error){
       if(token!==exercisePhotoSelectionToken)return false;
-      console.error(error);pendingExercisePhotoDataUrl=null;clearExercisePhotoObjectUrl();$("exercisePhoto").value="";showExercisePhotoPreview(current?.photo||"");
+      console.error(error);pendingExercisePhotoBlob=null;clearExercisePhotoObjectUrl();$("exercisePhoto").value="";showExercisePhotoPreview(exercisePhotoUrl(current));
       setExercisePhotoStatus(error.message||"The photo could not be prepared.","error");
       return false;
     }
   })();
 };
 $("removeExercisePhotoBtn").onclick=()=>{
-  exercisePhotoSelectionToken++;exercisePhotoCompressionPromise=null;pendingExercisePhotoDataUrl="";clearExercisePhotoObjectUrl();removeExercisePhotoRequested=true;$("exercisePhoto").value="";showExercisePhotoPreview("");setExercisePhotoStatus("Photo will be removed when you save.");
+  exercisePhotoSelectionToken++;exercisePhotoCompressionPromise=null;pendingExercisePhotoBlob=null;clearExercisePhotoObjectUrl();removeExercisePhotoRequested=true;$("exercisePhoto").value="";showExercisePhotoPreview("");setExercisePhotoStatus("Photo will be removed when you save.");
 };
 $("confirmRemoveWorkoutItemBtn").onclick=()=>{
   if(!pendingWorkoutItemRemoval)return closeDialog("removeWorkoutItemDialog");const pending=pendingWorkoutItemRemoval;applyWorkoutRemoval(pending);
@@ -720,9 +826,26 @@ $("exerciseForm").onsubmit=async e=>{
     if(!ready)return;
   }
   const old=id?exById(id):null;
-  const photo=removeExercisePhotoRequested?"":(pendingExercisePhotoDataUrl!==null?pendingExercisePhotoDataUrl:(old?.photo||""));
+  const recordId=id||uid();
+  let photoId=old?.photoId||"";
+  try{
+    if(removeExercisePhotoRequested){
+      if(photoId)await deletePhoto(photoId);
+      if(photoId)setExercisePhotoUrl(photoId,null);
+      photoId="";
+    }else if(pendingExercisePhotoBlob){
+      await putPhoto(recordId,pendingExercisePhotoBlob);
+      setExercisePhotoUrl(recordId,pendingExercisePhotoBlob);
+      photoId=recordId;
+    }
+  }catch(error){
+    console.error(error);
+    setExercisePhotoStatus(storageErrorMessage(error),"error");
+    return;
+  }
+  const legacyPhoto=!photoId&&!removeExercisePhotoRequested&&!pendingExercisePhotoBlob?String(old?.photo||""):"";
   const primaryMuscles=readChoiceValues("exercisePrimaryMuscles","exercisePrimaryCustom"),primaryKeys=new Set(primaryMuscles.map(x=>x.toLowerCase())),secondaryMuscles=readChoiceValues("exerciseSecondaryMuscles","exerciseSecondaryCustom").filter(x=>!primaryKeys.has(x.toLowerCase()));
-  const record={id:id||uid(),name,category:$("exerciseCategory").value,primaryMuscles,secondaryMuscles,equipment:$("exerciseEquipment").value,movementType:$("exerciseMovementType").value,muscle:primaryMuscles.join(", "),photo,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};
+  const record={id:recordId,name,category:$("exerciseCategory").value,primaryMuscles,secondaryMuscles,equipment:$("exerciseEquipment").value,movementType:$("exerciseMovementType").value,muscle:primaryMuscles.join(", "),photo:legacyPhoto,photoId,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};
   const index=id?state.exercises.findIndex(x=>x.id===id):-1;
   if(index>=0)state.exercises[index]=record;else state.exercises.push(record);
   if(!persist()){
@@ -755,7 +878,8 @@ $("teacherExportForm").onsubmit=event=>{
     console.error(error);$("teacherExportStatus").textContent="Spreadsheet export failed. Please try again.";
   }
 };
-$("exportBackupBtn").onclick=()=>downloadBackup(state);
+$("exportFullBackupBtn").onclick=downloadFullBackup;
+$("exportDataBackupBtn").onclick=()=>downloadBackup(state);
 $("restoreBackupInput").onchange=async e=>{
   const input=e.target,f=input.files[0];if(!f)return;
   let restored;
@@ -766,27 +890,39 @@ $("restoreBackupInput").onchange=async e=>{
     input.value="";alert("Invalid backup file. The JSON file could not be read.");return;
   }
   try{
-    const result=await compressStatePhotos(restored);
-    saveState(restored);state=loadState();renderAll();input.value="";
-    const note=result.optimized?` ${result.optimized} large photo${result.optimized===1?" was":"s were"} optimized, saving ${formatBytes(result.savedBytes)}.`:"";
+    const result=await prepareRestoredBackup(restored);
+    renderAll();input.value="";
+    const note=result.count?` ${result.count} photo${result.count===1?" was":"s were"} restored to separate photo storage (${formatBytes(result.storedBytes)}).`:" This backup did not contain photos.";
     alert(`Backup restored.${note}`);
   }catch(error){
     console.error(error);input.value="";
-    alert(error?.name==="StorageFullError"?storageErrorMessage(error):(error?.message||"A photo in this backup could not be prepared."));
+    alert(error?.name==="StorageFullError"||error?.name==="QuotaExceededError"?storageErrorMessage(error):(error?.message||"A photo in this backup could not be prepared."));
   }
 };
-$("clearDataBtn").onclick=()=>{if(confirm("Clear all local data?")){state=makeDefaultState();saveState(state);selectedDate=todayKey();weekOffset=0;renderAll()}};
+$("clearDataBtn").onclick=async()=>{
+  if(!confirm("Clear all local data and saved photos from this device?"))return;
+  try{
+    await clearPhotos();
+    for(const url of exercisePhotoUrls.values())URL.revokeObjectURL(url);
+    exercisePhotoUrls.clear();
+    state=makeDefaultState();saveState(state);selectedDate=todayKey();weekOffset=0;renderAll();
+  }catch(error){
+    console.error(error);alert("Local data could not be cleared. Please try again.");
+  }
+};
 if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
 async function initializeApp(){
   try{
-    const result=await compressStatePhotos(state);
-    if(result.optimized){
-      saveState(state);
-      setTimeout(()=>alert(`${result.optimized} large existing photo${result.optimized===1?" was":"s were"} optimized automatically, freeing ${formatBytes(result.savedBytes)}.`),0);
+    requestPersistentPhotoStorage();
+    const result=await migrateLegacyPhotos();
+    await refreshExercisePhotoUrls();
+    if(result.migrated){
+      const saved=Math.max(0,result.originalBytes-result.storedBytes);
+      setTimeout(()=>alert(`${result.migrated} existing photo${result.migrated===1?" was":"s were"} moved to separate photo storage. App data was reduced by approximately ${formatBytes(result.originalBytes)}${saved?` and the photos were compressed by ${formatBytes(saved)}`:""}.`),0);
     }
   }catch(error){
     console.error(error);
-    setTimeout(()=>alert(error?.message||"An existing photo could not be optimized."),0);
+    setTimeout(()=>alert(error?.message||"Existing photos could not be moved to separate storage. They remain in the current app data."),0);
   }
   renderAll();
 }

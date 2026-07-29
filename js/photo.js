@@ -1,6 +1,6 @@
-export const PHOTO_MAX_DATA_URL_CHARS=280000;
-const PHOTO_MAX_DIMENSION=1200;
-const JPEG_QUALITIES=[0.82,0.74,0.66,0.58,0.5];
+export const PHOTO_MAX_DIMENSION=2048;
+export const PHOTO_TARGET_BYTES=1400000;
+const JPEG_QUALITIES=[0.9,0.86,0.82,0.78];
 
 function readAsDataUrl(blob){
   return new Promise((resolve,reject)=>{
@@ -20,16 +20,29 @@ function loadImage(src){
   });
 }
 
-function renderJpeg(image,width,height,quality){
-  const canvas=document.createElement("canvas");
-  canvas.width=width;
-  canvas.height=height;
-  const context=canvas.getContext("2d");
-  if(!context)throw new Error("Photo compression is not supported in this browser.");
-  context.fillStyle="#fff";
-  context.fillRect(0,0,width,height);
-  context.drawImage(image,0,0,width,height);
-  return canvas.toDataURL("image/jpeg",quality);
+function renderJpegBlob(image,width,height,quality){
+  return new Promise((resolve,reject)=>{
+    const canvas=document.createElement("canvas");
+    canvas.width=width;
+    canvas.height=height;
+    const context=canvas.getContext("2d");
+    if(!context)return reject(new Error("Photo compression is not supported in this browser."));
+    context.imageSmoothingEnabled=true;
+    context.imageSmoothingQuality="high";
+    context.fillStyle="#fff";
+    context.fillRect(0,0,width,height);
+    context.drawImage(image,0,0,width,height);
+    canvas.toBlob(blob=>blob?resolve(blob):reject(new Error("The photo could not be compressed.")),"image/jpeg",quality);
+  });
+}
+
+function dataUrlToBlob(dataUrl){
+  const [header,payload=""]=String(dataUrl||"").split(",",2);
+  const type=header.match(/^data:([^;,]+)/)?.[1]||"application/octet-stream";
+  const binary=header.includes(";base64")?atob(payload):decodeURIComponent(payload);
+  const bytes=new Uint8Array(binary.length);
+  for(let index=0;index<binary.length;index++)bytes[index]=binary.charCodeAt(index);
+  return new Blob([bytes],{type});
 }
 
 export function dataUrlBinaryBytes(dataUrl){
@@ -50,68 +63,67 @@ export function formatBytes(bytes){
   return `${(value/(1024*1024)).toFixed(value<10*1024*1024?1:0)} MB`;
 }
 
-export async function compressPhotoDataUrl(dataUrl){
-  const original=String(dataUrl||"");
-  if(!original.startsWith("data:image/"))throw new Error("The selected file is not a supported image.");
-  const originalBytes=dataUrlBinaryBytes(original);
-  if(original.length<=PHOTO_MAX_DATA_URL_CHARS){
-    return {dataUrl:original,originalBytes,compressedBytes:originalBytes,changed:false};
-  }
-
-  const image=await loadImage(original);
+async function optimizePhotoBlob(sourceBlob){
+  if(!(sourceBlob instanceof Blob)||!String(sourceBlob.type||"").startsWith("image/"))throw new Error("Select an image file.");
+  const sourceUrl=await readAsDataUrl(sourceBlob);
+  const image=await loadImage(sourceUrl);
   const sourceWidth=image.naturalWidth||image.width;
   const sourceHeight=image.naturalHeight||image.height;
   if(!sourceWidth||!sourceHeight)throw new Error("The photo dimensions could not be read.");
 
-  const initialScale=Math.min(1,PHOTO_MAX_DIMENSION/Math.max(sourceWidth,sourceHeight));
+  const longest=Math.max(sourceWidth,sourceHeight);
+  const supportedOriginal=/^image\/(jpeg|png|webp)$/i.test(sourceBlob.type||"");
+  if(supportedOriginal&&longest<=PHOTO_MAX_DIMENSION&&sourceBlob.size<=PHOTO_TARGET_BYTES){
+    return {
+      blob:sourceBlob,
+      originalBytes:sourceBlob.size,
+      compressedBytes:sourceBlob.size,
+      width:sourceWidth,
+      height:sourceHeight,
+      changed:false
+    };
+  }
+
+  const initialScale=Math.min(1,PHOTO_MAX_DIMENSION/longest);
   let width=Math.max(1,Math.round(sourceWidth*initialScale));
   let height=Math.max(1,Math.round(sourceHeight*initialScale));
-  let best=original;
+  let best=null;
 
-  for(let sizeAttempt=0;sizeAttempt<6;sizeAttempt++){
+  for(let sizeAttempt=0;sizeAttempt<4;sizeAttempt++){
     for(const quality of JPEG_QUALITIES){
-      const candidate=renderJpeg(image,width,height,quality);
-      if(candidate.length<best.length)best=candidate;
-      if(candidate.length<=PHOTO_MAX_DATA_URL_CHARS){
+      const candidate=await renderJpegBlob(image,width,height,quality);
+      if(!best||candidate.size<best.blob.size)best={blob:candidate,width,height};
+      if(candidate.size<=PHOTO_TARGET_BYTES){
         return {
-          dataUrl:candidate,
-          originalBytes,
-          compressedBytes:dataUrlBinaryBytes(candidate),
-          changed:candidate!==original
+          blob:candidate,
+          originalBytes:sourceBlob.size,
+          compressedBytes:candidate.size,
+          width,
+          height,
+          changed:true
         };
       }
     }
-    width=Math.max(1,Math.round(width*.82));
-    height=Math.max(1,Math.round(height*.82));
+    width=Math.max(1,Math.round(width*.88));
+    height=Math.max(1,Math.round(height*.88));
   }
 
   return {
-    dataUrl:best,
-    originalBytes,
-    compressedBytes:dataUrlBinaryBytes(best),
-    changed:best!==original
+    blob:best.blob,
+    originalBytes:sourceBlob.size,
+    compressedBytes:best.blob.size,
+    width:best.width,
+    height:best.height,
+    changed:true
   };
 }
 
-export async function compressPhotoFile(file){
-  if(!file||!String(file.type||"").startsWith("image/"))throw new Error("Select an image file.");
-  return compressPhotoDataUrl(await readAsDataUrl(file));
+export function compressPhotoFile(file){
+  return optimizePhotoBlob(file);
 }
 
-export async function compressStatePhotos(state){
-  const exercises=Array.isArray(state?.exercises)?state.exercises:[];
-  let optimized=0;
-  let originalBytes=0;
-  let compressedBytes=0;
-  for(const exercise of exercises){
-    const photo=String(exercise?.photo||"");
-    if(!photo.startsWith("data:image/")||photo.length<=PHOTO_MAX_DATA_URL_CHARS)continue;
-    const result=await compressPhotoDataUrl(photo);
-    if(!result.changed)continue;
-    exercise.photo=result.dataUrl;
-    optimized++;
-    originalBytes+=result.originalBytes;
-    compressedBytes+=result.compressedBytes;
-  }
-  return {optimized,originalBytes,compressedBytes,savedBytes:Math.max(0,originalBytes-compressedBytes)};
+export function compressPhotoDataUrl(dataUrl){
+  const value=String(dataUrl||"");
+  if(!value.startsWith("data:image/"))throw new Error("The backup contains an unsupported photo.");
+  return optimizePhotoBlob(dataUrlToBlob(value));
 }

@@ -17,16 +17,16 @@ export function makeDefaultState(){
     {id:uid(),name:"Bike",category:"cardio",primaryMuscles:["Quads"],secondaryMuscles:["Glutes","Calves"],equipment:"Cardio machine",movementType:"Cardio",muscle:"Quads",photo:"",link:"",notes:"",archived:false},
     {id:uid(),name:"Hamstring Stretch",category:"flexibility",primaryMuscles:["Hamstrings"],secondaryMuscles:["Calves"],equipment:"Bodyweight",movementType:"Mobility",muscle:"Hamstrings",photo:"",link:"",notes:"",archived:false}
   ];
-  return {version:"1.4",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+  return {version:"1.4.7",exercises,plans:[],workouts:{},metrics:{},settings:{}};
 }
 export function loadState(){
   try{
     const s=JSON.parse(localStorage.getItem(KEY));
     if(!s)return makeDefaultState();
-    s.version="1.4";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
+    s.version="1.4.7";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
     const splitMuscles=value=>Array.isArray(value)?value.filter(Boolean):String(value||"").split(/[,;/]+/).map(x=>x.trim()).filter(Boolean);
     s.exercises.forEach(x=>{
-      x.archived ??= false;x.photo ||= "";x.link ||= "";x.notes ||= "";
+      x.archived ??= false;x.photo ||= "";x.photoId ||= "";x.link ||= "";x.notes ||= "";
       x.primaryMuscles=splitMuscles(x.primaryMuscles?.length?x.primaryMuscles:x.muscle);
       x.secondaryMuscles=splitMuscles(x.secondaryMuscles);
       const primaryKeys=new Set(x.primaryMuscles.map(v=>v.toLowerCase()));
@@ -77,16 +77,22 @@ export function saveState(s){
   try{localStorage.setItem(KEY,JSON.stringify(s))}
   catch(error){
     if(isStorageFullError(error)){
-      const storageError=new Error("Photo storage is full. Export a backup and optimize large photos before adding more.");
+      const storageError=new Error("App data storage is full. Export a backup before making more changes.");
       storageError.name="StorageFullError";
       throw storageError;
     }
     throw error;
   }
 }
-export function downloadBackup(s){
+export function downloadBackup(s,suffix="data"){
+  const backup=structuredClone(s);
+  backup.version="1.4.7";
+  for(const exercise of backup.exercises||[]){
+    exercise.photo="";
+    exercise.photoId="";
+  }
   const a=document.createElement("a");
-  a.href=URL.createObjectURL(new Blob([JSON.stringify(s,null,2)],{type:"application/json"}));
-  a.download=`fitness-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(backup,null,2)],{type:"application/json"}));
+  a.download=`fitness-${suffix}-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }

@@ -51,8 +51,8 @@ export function enableReorder({container,itemSelector,handleSelector,idAttribute
       if(!item||ordered.length<2)return;
 
       downEvent.preventDefault();
-      const pointerId=downEvent.pointerId,startX=downEvent.clientX,startY=downEvent.clientY;
-      let pointerX=startX,pointerY=startY,dragging=false,placeholder=null,scrollFrame=0;
+      const pointerId=downEvent.pointerId,startY=downEvent.clientY,originalNextSibling=item.nextSibling;
+      let pointerY=startY,dragging=false,placeholder=null,scrollFrame=0,finished=false;
       const scrollParent=findScrollParent(container);
       const originalStyles={
         position:item.style.position,
@@ -120,35 +120,40 @@ export function enableReorder({container,itemSelector,handleSelector,idAttribute
 
       const move=moveEvent=>{
         if(moveEvent.pointerId!==pointerId)return;
-        pointerX=moveEvent.clientX;pointerY=moveEvent.clientY;
-        if(!dragging&&Math.hypot(pointerX-startX,pointerY-startY)<5)return;
+        pointerY=moveEvent.clientY;
+        if(!dragging&&Math.abs(pointerY-startY)<6)return;
         moveEvent.preventDefault();
         if(!dragging)beginDrag();
-        item.style.transform=`translate3d(${pointerX-startX}px,${pointerY-startY}px,0)`;
+        item.style.transform=`translate3d(0,${pointerY-startY}px,0)`;
         positionPlaceholder();
       };
 
-      const finish=finishEvent=>{
+      const finish=(finishEvent,cancelled=false)=>{
+        if(finished)return;
         if(finishEvent?.pointerId!==undefined&&finishEvent.pointerId!==pointerId)return;
+        finished=true;
         window.removeEventListener("pointermove",move,true);
-        window.removeEventListener("pointerup",finish,true);
-        window.removeEventListener("pointercancel",finish,true);
-        window.removeEventListener("blur",finish,true);
+        window.removeEventListener("pointerup",endDrag,true);
+        window.removeEventListener("pointercancel",cancelDrag,true);
+        window.removeEventListener("blur",cancelDrag,true);
         cancelAnimationFrame(scrollFrame);
         if(!dragging)return;
-        container.insertBefore(item,placeholder);
+        if(cancelled)container.insertBefore(item,originalNextSibling);
+        else container.insertBefore(item,placeholder);
         placeholder.remove();
         item.classList.remove("reorder-dragging");
         container.classList.remove("reorder-active");
         document.body.classList.remove("reordering");
         restoreInlineStyles(item,originalStyles);
-        onCommit(orderedIds());
+        if(!cancelled)onCommit(orderedIds());
       };
+      const endDrag=event=>finish(event,false);
+      const cancelDrag=event=>finish(event,true);
 
       window.addEventListener("pointermove",move,{passive:false,capture:true});
-      window.addEventListener("pointerup",finish,true);
-      window.addEventListener("pointercancel",finish,true);
-      window.addEventListener("blur",finish,true);
+      window.addEventListener("pointerup",endDrag,true);
+      window.addEventListener("pointercancel",cancelDrag,true);
+      window.addEventListener("blur",cancelDrag,true);
     });
   }
 }

@@ -84,13 +84,14 @@
     <article class="card">
       <h3>Data</h3>
       <p id="storageUsage" class="muted"></p>
-      <button id="exportBackupBtn" class="full">Export backup</button>
+      <button id="exportFullBackupBtn" class="full">Export full backup (with photos)</button>
+      <button id="exportDataBackupBtn" class="secondary full">Export data backup (smaller, no photos)</button>
       <label class="file-button secondary full">Restore backup<input id="restoreBackupInput" type="file" accept=".json,application/json"></label>
       <button id="clearDataBtn" class="danger full">Clear all data</button>
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.4.6 — Reliable touch reordering, automatic photo compression, whole-panel removal, and muscle tracking.</p>
+      <p class="muted">Version 1.4.7 — Text-readable photo optimization, separate photo storage, full backup, and improved touch reordering.</p>
     </article>
   </section>
 </main>
@@ -176,7 +177,7 @@
       </label>
     </div>
     <label><span>Reference photo</span><input id="exercisePhoto" type="file" accept="image/*"></label>
-    <p id="exercisePhotoStatus" class="muted photo-status">Large photos are automatically optimized before saving.</p>
+    <p id="exercisePhotoStatus" class="muted photo-status">Photos are optimized for readable text and stored separately from app data.</p>
     <div id="exercisePhotoPreviewWrap" class="photo-preview-wrap hidden">
       <img id="exercisePhotoPreview" class="exercise-photo-preview" alt="Current exercise reference">
       <button id="removeExercisePhotoBtn" type="button" class="secondary full">Remove photo</button>
@@ -294,7 +295,10 @@
 <dialog id="referenceDialog">
   <div class="reference-dialog-content">
     <div class="dialog-title"><h3 id="referenceTitle">Reference</h3><button type="button" class="secondary icon-button" data-close="referenceDialog">×</button></div>
-    <img id="referenceImage" class="reference-dialog-image hidden" alt="Exercise reference">
+    <div id="referenceImageViewport" class="reference-image-viewport hidden">
+      <img id="referenceImage" class="reference-dialog-image" alt="Exercise reference">
+    </div>
+    <button id="referenceZoomBtn" type="button" class="secondary full hidden">View full-size photo</button>
     <div id="referenceMuscleMeta" class="reference-muscle-meta hidden"></div>
     <div id="referenceNotes" class="reference-notes hidden"></div>
     <a id="referenceLink" class="reference-link-button hidden" target="_blank" rel="noopener">Open external link</a>
