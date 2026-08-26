@@ -119,10 +119,9 @@ function previousTrackingValues(activityId,beforeDate){
   for(const date of dates){
     const item=[...(state.workouts[date]?.items||[])].reverse().find(x=>x.exerciseId===activityId&&x.type!=="cardio");
     if(!item)continue;
-    const raw=(item.sets||[]).map(set=>Number(set?.weight)||0),valid=raw.filter(weight=>weight>0);
-    if(!valid.length)continue;
-    const lastWeight=valid.at(-1);
-    return {date,weights:raw.map(weight=>weight>0?weight:lastWeight),lastWeight};
+    const lastSet=[...(item.sets||[])].reverse().find(set=>Number(set?.weight)>0&&Number(set?.reps)>0);
+    if(!lastSet)continue;
+    return {date,lastSet:{weight:Number(lastSet.weight),reps:Number(lastSet.reps)}};
   }
   return null;
 }
@@ -139,9 +138,10 @@ function createPlanItem(ex,options={}){
 }
 function createSessionItem(ex,options={},date=todayKey(),sourceInfo={}){
   if(ex.category==="cardio")return {id:uid(),exerciseId:ex.id,exerciseName:ex.name,category:ex.category,type:"cardio",intervals:(options.intervals||[10]).map(value=>({minutes:Number(typeof value==="number"?value:value?.minutes)||10,targetHr:"",done:false})),...sourceInfo};
-  const defaults=trackingDefaults(ex),count=Math.max(1,Number(options.sets)||defaults.sets),reps=Number(options.reps)||defaults.reps;
+  const defaults=trackingDefaults(ex),count=Math.max(1,Number(options.sets)||defaults.sets),planReps=Number(options.reps)||defaults.reps;
   const previous=ex.category==="strength"?previousTrackingValues(ex.id,date):null;
-  const sets=Array.from({length:count},(_,index)=>({weight:previous?.weights[index]??previous?.lastWeight??0,reps,done:false}));
+  const startingSet=previous?.lastSet;
+  const sets=Array.from({length:count},()=>({weight:startingSet?.weight??0,reps:startingSet?.reps??planReps,done:false}));
   return {id:uid(),exerciseId:ex.id,exerciseName:ex.name,category:ex.category,type:"exercise",sets,...sourceInfo};
 }
 function addActivityToSession(ex,date,options={},sourceInfo={}){
@@ -153,7 +153,7 @@ function addActivityToSession(ex,date,options={},sourceInfo={}){
 function previousWeightText(ex,date){
   if(ex?.category!=="strength")return "";
   const previous=previousTrackingValues(ex.id,date);
-  return previous?`Last used ${previous.lastWeight} lb on ${previous.date}. Weight will be prefilled.`:"";
+  return previous?`Last set: ${previous.lastSet.reps} reps · ${previous.lastSet.weight} lb on ${previous.date}. This will prefill all sets.`:"";
 }
 
 function renderHeader(){
@@ -604,7 +604,7 @@ async function downloadFullBackup(){
   button.disabled=true;button.textContent="Preparing photos…";
   try{
     const backup=structuredClone(state),photos=new Map((await getAllPhotos()).map(record=>[record.id,record]));
-    backup.version="1.4.7";
+    backup.version="1.4.8";
     backup.backupType="full";
     for(const exercise of backup.exercises||[]){
       const record=exercise.photoId?photos.get(exercise.photoId):null;
@@ -622,7 +622,7 @@ async function downloadFullBackup(){
 async function prepareRestoredBackup(restored){
   const prepared=structuredClone(restored),photoEntries=[];
   let originalBytes=0,storedBytes=0;
-  prepared.version="1.4.7";
+  prepared.version="1.4.8";
   delete prepared.backupType;
   for(const exercise of prepared.exercises||[]){
     const legacyPhoto=String(exercise.photo||"");
