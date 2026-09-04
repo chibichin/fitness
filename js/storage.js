@@ -17,13 +17,13 @@ export function makeDefaultState(){
     {id:uid(),name:"Bike",category:"cardio",primaryMuscles:["Quads"],secondaryMuscles:["Glutes","Calves"],equipment:"Cardio machine",movementType:"Cardio",muscle:"Quads",photo:"",link:"",notes:"",archived:false},
     {id:uid(),name:"Hamstring Stretch",category:"flexibility",primaryMuscles:["Hamstrings"],secondaryMuscles:["Calves"],equipment:"Bodyweight",movementType:"Mobility",muscle:"Hamstrings",photo:"",link:"",notes:"",archived:false}
   ];
-  return {version:"1.4.10",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+  return {version:"1.4.11",exercises,plans:[],workouts:{},metrics:{},settings:{}};
 }
 export function loadState(){
   try{
     const s=JSON.parse(localStorage.getItem(KEY));
     if(!s)return makeDefaultState();
-    s.version="1.4.10";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
+    s.version="1.4.11";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
     const splitMuscles=value=>Array.isArray(value)?value.filter(Boolean):String(value||"").split(/[,;/]+/).map(x=>x.trim()).filter(Boolean);
     s.exercises.forEach(x=>{
       x.archived ??= false;x.photo ||= "";x.photoId ||= "";x.link ||= "";x.notes ||= "";
@@ -86,7 +86,7 @@ export function saveState(s){
 }
 export function downloadBackup(s,suffix="data"){
   const backup=structuredClone(s);
-  backup.version="1.4.10";
+  backup.version="1.4.11";
   for(const exercise of backup.exercises||[]){
     exercise.photo="";
     exercise.photoId="";

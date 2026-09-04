@@ -491,27 +491,14 @@ function renderProgress(){
 }
 
 
-// Teacher date-range spreadsheet export. Calendar weeks are stacked vertically
-// on one worksheet so the complete selected range prints on one Letter page.
+// Teacher date-range spreadsheet export. Every record-bearing date becomes one
+// continuous worksheet column so the complete range prints on one Letter page.
 function dateFromKey(key){return new Date(`${key}T12:00:00`)}
-function teacherWeekKeys(containingDate){
-  const base=dateFromKey(containingDate),start=new Date(base);start.setDate(base.getDate()-base.getDay());
-  return Array.from({length:7},(_,index)=>{const day=new Date(start);day.setDate(start.getDate()+index);return keyFromDate(day)});
-}
 function teacherDateRangeKeys(beginDate,endDate){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(String(beginDate||""))||!/^\d{4}-\d{2}-\d{2}$/.test(String(endDate||""))||beginDate>endDate)return [];
   const cursor=dateFromKey(beginDate),end=dateFromKey(endDate),keys=[];
   while(cursor<=end){keys.push(keyFromDate(cursor));cursor.setDate(cursor.getDate()+1)}
   return keys;
-}
-function teacherDateRangeWeeks(beginDate,endDate){
-  const groups=new Map();
-  teacherDateRangeKeys(beginDate,endDate).filter(key=>(state.workouts[key]?.items||[]).length).forEach(key=>{
-    const weekStart=teacherWeekKeys(key)[0];
-    if(!groups.has(weekStart))groups.set(weekStart,[]);
-    groups.get(weekStart).push(key);
-  });
-  return [...groups.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([weekStart,dates])=>({weekStart,dates}));
 }
 function teacherItemKey(item){return item.exerciseId||`name:${normalizeName(item.exerciseName||"Exercise")}`}
 function teacherRows(dates,category){
@@ -579,29 +566,24 @@ function teacherStrengthReportRow(row,dates){
   return {name:row.name,detail:teacherStrengthSetCount(row.latest),values:dates.map(date=>teacherStrengthValue(row.byDate[date]))};
 }
 function buildTeacherSpreadsheetReport({student,goals,beginDate,endDate}){
-  const weeks=teacherDateRangeWeeks(beginDate,endDate);
-  if(!weeks.length)return {beginDate,endDate,dates:[],pages:[]};
-  const pages=weeks.map(({weekStart,dates})=>{
-    const warm=teacherRows(dates,"warmup"),strength=teacherRows(dates,"strength"),flexibility=teacherRows(dates,"flexibility");
-    const cardioByDate=dates.map(teacherCardioForDate);
-    return {
-      weekStart,
-      weekLabel:`${teacherDateLabel(weekStart)} - ${teacherDateLabel(teacherWeekKeys(weekStart)[6])}`,
-      dates:dates.map(key=>({key,label:teacherDateLabel(key)})),
-      warmup:warm.map(row=>teacherReportRow(row,dates,teacherCompletedMark)),
-      strength:strength.map(row=>teacherStrengthReportRow(row,dates)),
-      cardio:{names:cardioByDate.map(item=>item.name),heartRates:cardioByDate.map(item=>item.heartRate),minutes:cardioByDate.map(item=>item.minutes)},
-      flexibility:flexibility.map(row=>teacherReportRow(row,dates,teacherCompletedMark))
-    };
-  });
-  return {student,goals,beginDate,endDate,dateRangeLabel:`${teacherDateLabel(beginDate)} - ${teacherDateLabel(endDate)}`,pages};
+  const dates=teacherDateRangeKeys(beginDate,endDate).filter(key=>(state.workouts[key]?.items||[]).length);
+  if(!dates.length)return {beginDate,endDate,dates:[],pages:[]};
+  const warm=teacherRows(dates,"warmup"),strength=teacherRows(dates,"strength"),flexibility=teacherRows(dates,"flexibility"),cardioByDate=dates.map(teacherCardioForDate);
+  const page={
+    dates:dates.map(key=>({key,label:teacherDateLabel(key)})),
+    warmup:warm.map(row=>teacherReportRow(row,dates,teacherCompletedMark)),
+    strength:strength.map(row=>teacherStrengthReportRow(row,dates)),
+    cardio:{names:cardioByDate.map(item=>item.name),heartRates:cardioByDate.map(item=>item.heartRate),minutes:cardioByDate.map(item=>item.minutes)},
+    flexibility:flexibility.map(row=>teacherReportRow(row,dates,teacherCompletedMark))
+  };
+  return {student,goals,beginDate,endDate,dateRangeLabel:`${teacherDateLabel(beginDate)} - ${teacherDateLabel(endDate)}`,dates,page,pages:[page]};
 }
 function updateTeacherExportStatus(){
   const beginDate=$("teacherBeginDate").value,endDate=$("teacherEndDate").value,status=$("teacherExportStatus");
   if(!beginDate||!endDate){status.textContent="Select beginning and ending dates.";return}
   if(beginDate>endDate){status.textContent="Beginning date must be on or before ending date.";return}
-  const dates=teacherDateRangeKeys(beginDate,endDate).filter(key=>(state.workouts[key]?.items||[]).length),weeks=teacherDateRangeWeeks(beginDate,endDate);
-  status.textContent=dates.length?`${dates.length} workout date${dates.length===1?"":"s"} from ${weeks.length} calendar week${weeks.length===1?"":"s"} will be placed on one worksheet.`:"No workout records in this date range.";
+  const dates=teacherDateRangeKeys(beginDate,endDate).filter(key=>(state.workouts[key]?.items||[]).length);
+  status.textContent=dates.length?`${dates.length} workout date${dates.length===1?"":"s"} will be placed in continuous columns on one worksheet.`:"No workout records in this date range.";
 }
 function openTeacherExport(){
   const saved=state.settings.teacherExport||{},base=dateFromKey(selectedDate),monthStart=new Date(base.getFullYear(),base.getMonth(),1,12),monthEnd=new Date(base.getFullYear(),base.getMonth()+1,0,12);
@@ -633,7 +615,7 @@ async function downloadFullBackup(){
   button.disabled=true;button.textContent="Preparing photos…";
   try{
     const backup=structuredClone(state),photos=new Map((await getAllPhotos()).map(record=>[record.id,record]));
-    backup.version="1.4.10";
+    backup.version="1.4.11";
     backup.backupType="full";
     for(const exercise of backup.exercises||[]){
       const record=exercise.photoId?photos.get(exercise.photoId):null;
@@ -651,7 +633,7 @@ async function downloadFullBackup(){
 async function prepareRestoredBackup(restored){
   const prepared=structuredClone(restored),photoEntries=[];
   let originalBytes=0,storedBytes=0;
-  prepared.version="1.4.10";
+  prepared.version="1.4.11";
   delete prepared.backupType;
   for(const exercise of prepared.exercises||[]){
     const legacyPhoto=String(exercise.photo||"");

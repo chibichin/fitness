@@ -28,71 +28,61 @@ function rowXml(index,height,cells){
   return `<row r="${index}" ht="${height}" customHeight="1">${cells.join("")}</row>`;
 }
 
-function gridRow(index,height,values,styles={}){
+function gridRow(index,height,values,styles={},columnCount=values.length){
   const cells=[];
-  for(let column=1;column<=9;column++)cells.push(cellXml(index,column,values[column-1]??"",styles[column]??styles.default??7));
+  for(let column=1;column<=columnCount;column++)cells.push(cellXml(index,column,values[column-1]??"",styles[column]??styles.default??7));
   return rowXml(index,height,cells);
 }
 
 function activityRow(index,row,dateCount,{boldMarks=false,small=false}={}){
   const values=[row?.name||"",row?.detail||""];
-  for(let slot=0;slot<7;slot++)values.push(slot<dateCount?(row?.values?.[slot]??""):"");
+  for(let slot=0;slot<dateCount;slot++)values.push(row?.values?.[slot]??"");
   const styles={1:7,2:8,default:small?10:(boldMarks?9:8)};
-  return gridRow(index,18,values,styles);
+  return gridRow(index,small?32:18,values,styles,2+dateCount);
 }
 
-function worksheetRowCount(pages){
-  return 4+pages.reduce((total,page,index)=>total+(index?1:0)+8+Math.max(1,page.warmup?.length||0)+Math.max(1,page.strength?.length||0)+Math.max(1,page.flexibility?.length||0),0);
+function worksheetRowCount(page){
+  return 11+Math.max(1,page.warmup?.length||0)+Math.max(1,page.strength?.length||0)+Math.max(1,page.flexibility?.length||0);
 }
 
-function worksheetXml(report,pages){
-  const rows=[],merges=["A1:D1","A2:D2","F2:I2","B3:E3","B4:I4"];
+function worksheetXml(report,page){
+  const dates=page.dates||[],dateCount=dates.length,columnCount=2+dateCount,lastColumn=columnName(columnCount),rows=[];
+  const merges=[`A1:${lastColumn}1`,`A2:B2`,`B3:${lastColumn}3`,`B4:${lastColumn}4`];
   rows.push(rowXml(1,27,[cellXml(1,1,"Canada College",1)]));
-  rows.push(rowXml(2,18,[cellXml(2,1,"Professor R. Marquez",2),cellXml(2,9,report.dateRangeLabel||"",11)]));
+  rows.push(rowXml(2,18,[cellXml(2,1,"Professor R. Marquez",2),cellXml(2,columnCount,report.dateRangeLabel||"",11)]));
   rows.push(rowXml(3,18,[cellXml(3,1,"Student:",2),cellXml(3,2,report.student||"",3)]));
   rows.push(rowXml(4,24,[cellXml(4,1,"Goals:",3),cellXml(4,2,report.goals||"",3)]));
   let rowIndex=5;
-  pages.forEach((page,pageIndex)=>{
-    if(pageIndex)rows.push(rowXml(rowIndex++,8,[]));
-    const dates=page.dates||[],dateCount=Math.min(dates.length,7),weekTitle=`Week ${pageIndex+1}: ${page.weekLabel||""}`;
-    rows.push(rowXml(rowIndex,20,[cellXml(rowIndex,1,weekTitle,2)]));
-    merges.push(`A${rowIndex}:I${rowIndex}`);rowIndex++;
 
-    const columnHeader=["Exercise name","Reps / Sets"];
-    for(let slot=0;slot<7;slot++)columnHeader.push(slot<dateCount?dates[slot].label:"");
-    rows.push(gridRow(rowIndex++,20,columnHeader,{1:4,2:5,default:6}));
+  const columnHeader=["Exercise name","Sets / Reps",...dates.map(date=>date.label)];
+  rows.push(gridRow(rowIndex++,20,columnHeader,{1:4,2:5,default:6},columnCount));
 
-    const warmHeader=["WARM-UP","Reps / Sets"];
-    for(let slot=0;slot<7;slot++)warmHeader.push(slot<dateCount?dates[slot].label:"");
-    rows.push(gridRow(rowIndex++,20,warmHeader,{1:4,2:5,default:6}));
-    const warmRows=page.warmup?.length?page.warmup:[null];
-    warmRows.forEach(item=>rows.push(activityRow(rowIndex++,item,dateCount,{boldMarks:true})));
+  const warmHeader=["WARM-UP","Sets / Reps"];
+  rows.push(gridRow(rowIndex++,20,warmHeader,{1:4,2:5,default:6},columnCount));
+  const warmRows=page.warmup?.length?page.warmup:[null];
+  warmRows.forEach(item=>rows.push(activityRow(rowIndex++,item,dateCount,{boldMarks:true})));
 
-    const strengthHeader=["STRENGTH","Sets"];
-    for(let slot=0;slot<7;slot++)strengthHeader.push(slot<dateCount?dates[slot].label:"");
-    rows.push(gridRow(rowIndex++,20,strengthHeader,{1:4,2:5,default:6}));
-    const strengthRows=page.strength?.length?page.strength:[null];
-    strengthRows.forEach(item=>rows.push(activityRow(rowIndex++,item,dateCount,{small:true})));
+  const strengthHeader=["STRENGTH","Sets"];
+  rows.push(gridRow(rowIndex++,20,strengthHeader,{1:4,2:5,default:6},columnCount));
+  const strengthRows=page.strength?.length?page.strength:[null];
+  strengthRows.forEach(item=>rows.push(activityRow(rowIndex++,item,dateCount,{small:true})));
 
-    const cardioHeader=["CARDIOVASCULAR","Exercise name"];
-    for(let slot=0;slot<7;slot++)cardioHeader.push(slot<dateCount?(page.cardio?.names?.[slot]||""):"");
-    rows.push(gridRow(rowIndex++,20,cardioHeader,{1:4,2:5,default:10}));
-    rows.push(gridRow(rowIndex++,20,["Target Heart Rate Range","",...(page.cardio?.heartRates||[])],{1:7,2:8,default:8}));
-    rows.push(gridRow(rowIndex++,20,["Duration (min)","",...(page.cardio?.minutes||[])],{1:7,2:8,default:8}));
+  const cardioHeader=["CARDIOVASCULAR","Exercise name",...(page.cardio?.names||[])];
+  rows.push(gridRow(rowIndex++,20,cardioHeader,{1:4,2:5,default:10},columnCount));
+  rows.push(gridRow(rowIndex++,20,["Target Heart Rate Range","",...(page.cardio?.heartRates||[])],{1:7,2:8,default:8},columnCount));
+  rows.push(gridRow(rowIndex++,20,["Duration (min)","",...(page.cardio?.minutes||[])],{1:7,2:8,default:8},columnCount));
 
-    const flexibilityHeader=["FLEXIBILITY","Reps / Sets"];
-    for(let slot=0;slot<7;slot++)flexibilityHeader.push(slot<dateCount?dates[slot].label:"");
-    rows.push(gridRow(rowIndex++,20,flexibilityHeader,{1:4,2:5,default:6}));
-    const flexibilityRows=page.flexibility?.length?page.flexibility:[null];
-    flexibilityRows.forEach(item=>rows.push(activityRow(rowIndex++,item,dateCount,{boldMarks:true})));
-  });
+  const flexibilityHeader=["FLEXIBILITY","Sets / Reps"];
+  rows.push(gridRow(rowIndex++,20,flexibilityHeader,{1:4,2:5,default:6},columnCount));
+  const flexibilityRows=page.flexibility?.length?page.flexibility:[null];
+  flexibilityRows.forEach(item=>rows.push(activityRow(rowIndex++,item,dateCount,{boldMarks:true})));
   const lastRow=rowIndex-1;
 
-  const cols=['<col min="1" max="1" width="27" customWidth="1"/>','<col min="2" max="2" width="13" customWidth="1"/>','<col min="3" max="9" width="11" customWidth="1"/>'].join("");
+  const cols=['<col min="1" max="1" width="27" customWidth="1"/>','<col min="2" max="2" width="13" customWidth="1"/>',`<col min="3" max="${columnCount}" width="11" customWidth="1"/>`].join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
-  <dimension ref="A1:I${lastRow}"/>
+  <dimension ref="A1:${lastColumn}${lastRow}"/>
   <sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews>
   <sheetFormatPr defaultRowHeight="18"/>
   <cols>${cols}</cols>
@@ -129,16 +119,16 @@ function stylesXml(){
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1" shrinkToFit="1"/></xf>
     <xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 }
 
-function workbookXml(sheetNames,pageRows){
+function workbookXml(sheetNames,pageRows,lastColumns){
   const sheets=sheetNames.map((name,index)=>`<sheet name="${xmlEscape(name)}" sheetId="${index+1}" r:id="rId${index+1}"/>`).join("");
-  const printAreas=sheetNames.map((name,index)=>`<definedName name="_xlnm.Print_Area" localSheetId="${index}">'${name.replace(/'/g,"''")}'!$A$1:$I$${pageRows[index]}</definedName>`).join("");
+  const printAreas=sheetNames.map((name,index)=>`<definedName name="_xlnm.Print_Area" localSheetId="${index}">'${name.replace(/'/g,"''")}'!$A$1:$${lastColumns[index]}$${pageRows[index]}</definedName>`).join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="14000"/></bookViews>
@@ -216,18 +206,18 @@ function safeFilenamePart(value){
 }
 
 export function createTeacherWorkbookBlob(report){
-  const pages=report.pages?.length?report.pages:[{warmup:[],strength:[],flexibility:[],cardio:{names:[],heartRates:[],minutes:[]}}];
-  const sheetNames=["Workout Program"],pageRows=[worksheetRowCount(pages)];
+  const page=report.page||report.pages?.[0]||{dates:[],warmup:[],strength:[],flexibility:[],cardio:{names:[],heartRates:[],minutes:[]}};
+  const sheetNames=["Workout Program"],pageRows=[worksheetRowCount(page)],lastColumns=[columnName(2+(page.dates?.length||0))];
   const files=[
     {name:"[Content_Types].xml",data:contentTypesXml(1)},
     {name:"_rels/.rels",data:rootRelsXml()},
     {name:"docProps/app.xml",data:appPropsXml(sheetNames)},
     {name:"docProps/core.xml",data:corePropsXml()},
-    {name:"xl/workbook.xml",data:workbookXml(sheetNames,pageRows)},
+    {name:"xl/workbook.xml",data:workbookXml(sheetNames,pageRows,lastColumns)},
     {name:"xl/_rels/workbook.xml.rels",data:workbookRelsXml(1)},
     {name:"xl/styles.xml",data:stylesXml()}
   ];
-  files.push({name:"xl/worksheets/sheet1.xml",data:worksheetXml(report,pages)});
+  files.push({name:"xl/worksheets/sheet1.xml",data:worksheetXml(report,page)});
   return zipStore(files);
 }
 
