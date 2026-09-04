@@ -48,16 +48,17 @@ function worksheetXml(report,page,pageIndex){
   rows.push(rowXml(2,18,[cellXml(2,1,"Professor R. Marquez",2),cellXml(2,9,pageLabel,11)]));
   rows.push(rowXml(3,18,[cellXml(3,1,"Student:",2),cellXml(3,2,report.student||"",3)]));
   rows.push(rowXml(4,24,[cellXml(4,1,"Goals:",3),cellXml(4,2,report.goals||"",3)]));
-  rows.push(rowXml(5,10,[]));
+  const dateHeaders=Array.from({length:9},(_,slot)=>slot<dateCount?dates[slot].label:"");
+  rows.push(gridRow(5,18,["Workout dates","",...dateHeaders],{1:7,2:8,default:8}));
 
   let rowIndex=6;
   const warmHeader=["WARM-EXERCISES","Reps"];
-  for(let slot=0;slot<9;slot++)warmHeader.push(slot<dateCount?dates[slot].label:"");
+  warmHeader.push(...dateHeaders);
   rows.push(gridRow(rowIndex++,20,warmHeader,{1:4,2:5,default:6}));
   const warmRows=page.warmup?.length?page.warmup:[null];
   warmRows.forEach(item=>rows.push(activityRow(rowIndex++,18,item,dateCount,{boldMarks:true})));
 
-  rows.push(gridRow(rowIndex++,20,["STRENGTH","Sets/Reps","","","","","","","","",""] ,{1:4,2:5,default:8}));
+  rows.push(gridRow(rowIndex++,20,["STRENGTH","Sets/Reps",...dateHeaders],{1:4,2:5,default:8}));
   const strengthRows=page.strength?.length?page.strength:[null];
   strengthRows.forEach(item=>rows.push(activityRow(rowIndex++,18,item,dateCount)));
 
@@ -65,7 +66,7 @@ function worksheetXml(report,page,pageIndex){
   rows.push(gridRow(rowIndex++,20,["Target Heart Rate Range","",...(page.cardio?.heartRates||[])],{1:7,2:8,default:8}));
   rows.push(gridRow(rowIndex++,20,["Duration (min)","",...(page.cardio?.minutes||[])],{1:7,2:8,default:8}));
 
-  rows.push(gridRow(rowIndex++,20,["FLEXIBILITY","","","","","","","","","",""] ,{1:4,2:8,default:8}));
+  rows.push(gridRow(rowIndex++,20,["FLEXIBILITY","",...dateHeaders],{1:4,2:8,default:8}));
   const flexibilityRows=page.flexibility?.length?page.flexibility:[null];
   flexibilityRows.forEach(item=>rows.push(activityRow(rowIndex++,18,item,dateCount,{boldMarks:true})));
   const lastRow=rowIndex-1;
