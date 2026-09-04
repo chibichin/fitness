@@ -38,7 +38,8 @@ function activityRow(index,row,dateCount,{boldMarks=false,small=false}={}){
   const values=[row?.name||"",row?.detail||""];
   for(let slot=0;slot<dateCount;slot++)values.push(row?.values?.[slot]??"");
   const styles={1:7,2:8,default:small?10:(boldMarks?9:8)};
-  return gridRow(index,small?32:18,values,styles,2+dateCount);
+  const lineCount=small?Math.max(1,...values.slice(2).map(value=>String(value||"").split("\n").length)):1;
+  return gridRow(index,small?Math.max(32,lineCount*15):18,values,styles,2+dateCount);
 }
 
 function worksheetRowCount(page){

@@ -8,6 +8,10 @@ export function uid(){
   const hex=[...bytes].map(x=>x.toString(16).padStart(2,"0"));
   return `${hex.slice(0,4).join("")}-${hex.slice(4,6).join("")}-${hex.slice(6,8).join("")}-${hex.slice(8,10).join("")}-${hex.slice(10).join("")}`;
 }
+export function exerciseDisplayName(baseName,variationName=""){
+  const base=String(baseName||"").trim(),variation=String(variationName||"").trim();
+  return variation?`${base} — ${variation}`:base;
+}
 export function makeDefaultState(){
   const exercises=[
     {id:uid(),name:"Knee Hug",category:"warmup",primaryMuscles:["Hip flexors"],secondaryMuscles:["Glutes"],equipment:"Bodyweight",movementType:"Mobility",muscle:"Hip flexors",photo:"",link:"",notes:"",archived:false},
@@ -17,16 +21,19 @@ export function makeDefaultState(){
     {id:uid(),name:"Bike",category:"cardio",primaryMuscles:["Quads"],secondaryMuscles:["Glutes","Calves"],equipment:"Cardio machine",movementType:"Cardio",muscle:"Quads",photo:"",link:"",notes:"",archived:false},
     {id:uid(),name:"Hamstring Stretch",category:"flexibility",primaryMuscles:["Hamstrings"],secondaryMuscles:["Calves"],equipment:"Bodyweight",movementType:"Mobility",muscle:"Hamstrings",photo:"",link:"",notes:"",archived:false}
   ];
-  return {version:"1.4.12",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+  exercises.forEach(exercise=>{exercise.baseName=exercise.name;exercise.variationName="";exercise.familyId=""});
+  return {version:"1.4.14",exercises,plans:[],workouts:{},metrics:{},settings:{}};
 }
 export function loadState(){
   try{
     const s=JSON.parse(localStorage.getItem(KEY));
     if(!s)return makeDefaultState();
-    s.version="1.4.12";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
+    s.version="1.4.14";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
     const splitMuscles=value=>Array.isArray(value)?value.filter(Boolean):String(value||"").split(/[,;/]+/).map(x=>x.trim()).filter(Boolean);
     s.exercises.forEach(x=>{
       x.archived ??= false;x.photo ||= "";x.photoId ||= "";x.link ||= "";x.notes ||= "";
+      x.baseName=String(x.baseName||x.name||"").trim();x.variationName=String(x.variationName||"").trim();x.familyId=String(x.familyId||"");
+      x.name=exerciseDisplayName(x.baseName,x.variationName);
       x.primaryMuscles=splitMuscles(x.primaryMuscles?.length?x.primaryMuscles:x.muscle);
       x.secondaryMuscles=splitMuscles(x.secondaryMuscles);
       const primaryKeys=new Set(x.primaryMuscles.map(v=>v.toLowerCase()));
@@ -86,7 +93,7 @@ export function saveState(s){
 }
 export function downloadBackup(s,suffix="data"){
   const backup=structuredClone(s);
-  backup.version="1.4.12";
+  backup.version="1.4.14";
   for(const exercise of backup.exercises||[]){
     exercise.photo="";
     exercise.photoId="";
