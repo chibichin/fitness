@@ -1,8 +1,8 @@
-import {loadState,saveState,makeDefaultState,downloadBackup,uid} from "./storage.js";
-import {downloadTeacherWorkbook} from "./xlsx.js";
-import {compressPhotoFile,compressPhotoDataUrl,formatBytes} from "./photo.js";
-import {putPhoto,getAllPhotos,deletePhoto,clearPhotos,replaceAllPhotos,photoStorageStats,blobToDataUrl,requestPersistentPhotoStorage} from "./photo-store.js";
-import {enableReorder} from "./reorder.js";
+import {loadState,saveState,makeDefaultState,downloadBackup,uid} from "./storage.js?v=1.4.12";
+import {downloadTeacherWorkbook} from "./xlsx.js?v=1.4.12";
+import {compressPhotoFile,compressPhotoDataUrl,formatBytes} from "./photo.js?v=1.4.12";
+import {putPhoto,getAllPhotos,deletePhoto,clearPhotos,replaceAllPhotos,photoStorageStats,blobToDataUrl,requestPersistentPhotoStorage} from "./photo-store.js?v=1.4.12";
+import {enableReorder} from "./reorder.js?v=1.4.12";
 
 let state=loadState();
 let selectedDate=todayKey();
@@ -615,7 +615,7 @@ async function downloadFullBackup(){
   button.disabled=true;button.textContent="Preparing photos…";
   try{
     const backup=structuredClone(state),photos=new Map((await getAllPhotos()).map(record=>[record.id,record]));
-    backup.version="1.4.11";
+    backup.version="1.4.12";
     backup.backupType="full";
     for(const exercise of backup.exercises||[]){
       const record=exercise.photoId?photos.get(exercise.photoId):null;
@@ -633,7 +633,7 @@ async function downloadFullBackup(){
 async function prepareRestoredBackup(restored){
   const prepared=structuredClone(restored),photoEntries=[];
   let originalBytes=0,storedBytes=0;
-  prepared.version="1.4.11";
+  prepared.version="1.4.12";
   delete prepared.backupType;
   for(const exercise of prepared.exercises||[]){
     const legacyPhoto=String(exercise.photo||"");
@@ -923,7 +923,7 @@ $("clearDataBtn").onclick=async()=>{
     console.error(error);alert("Local data could not be cleared. Please try again.");
   }
 };
-if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
+if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js?v=1.4.12",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
 async function initializeApp(){
   try{
     requestPersistentPhotoStorage();
