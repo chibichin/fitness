@@ -491,25 +491,22 @@ function renderProgress(){
 }
 
 
-// Teacher monthly spreadsheet export. Each worksheet is one calendar week so
-// every workout section for a date stays together in the teacher's layout.
+// Teacher date-range spreadsheet export. Calendar weeks are stacked vertically
+// on one worksheet so the complete selected range prints on one Letter page.
 function dateFromKey(key){return new Date(`${key}T12:00:00`)}
 function teacherWeekKeys(containingDate){
   const base=dateFromKey(containingDate),start=new Date(base);start.setDate(base.getDate()-base.getDay());
   return Array.from({length:7},(_,index)=>{const day=new Date(start);day.setDate(start.getDate()+index);return keyFromDate(day)});
 }
-function teacherMonthKeys(month){
-  const match=/(\d{4})-(\d{2})/.exec(String(month||""));
-  if(!match)return [];
-  const year=Number(match[1]),monthIndex=Number(match[2])-1;
-  if(monthIndex<0||monthIndex>11)return [];
-  const cursor=new Date(year,monthIndex,1,12),keys=[];
-  while(cursor.getFullYear()===year&&cursor.getMonth()===monthIndex){keys.push(keyFromDate(cursor));cursor.setDate(cursor.getDate()+1)}
+function teacherDateRangeKeys(beginDate,endDate){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(beginDate||""))||!/^\d{4}-\d{2}-\d{2}$/.test(String(endDate||""))||beginDate>endDate)return [];
+  const cursor=dateFromKey(beginDate),end=dateFromKey(endDate),keys=[];
+  while(cursor<=end){keys.push(keyFromDate(cursor));cursor.setDate(cursor.getDate()+1)}
   return keys;
 }
-function teacherMonthWeeks(month){
+function teacherDateRangeWeeks(beginDate,endDate){
   const groups=new Map();
-  teacherMonthKeys(month).filter(key=>(state.workouts[key]?.items||[]).length).forEach(key=>{
+  teacherDateRangeKeys(beginDate,endDate).filter(key=>(state.workouts[key]?.items||[]).length).forEach(key=>{
     const weekStart=teacherWeekKeys(key)[0];
     if(!groups.has(weekStart))groups.set(weekStart,[]);
     groups.get(weekStart).push(key);
@@ -539,11 +536,24 @@ function teacherSetsReps(item){
   if(same)return `${sets.length}x${positive[0]}`;
   return `${sets.length}x${Math.min(...positive)}-${Math.max(...positive)}`;
 }
-function teacherExportWeight(item){
-  const sets=[...(item?.sets||[])].reverse();
-  const completed=sets.find(set=>set.done&&Number(set.weight)>0);
-  const recorded=sets.find(set=>Number(set.weight)>0);
-  return Number((completed||recorded)?.weight)||"";
+function teacherStrengthValue(item){
+  const sets=(item?.sets||[]).filter(set=>Number(set.reps)>0||Number(set.weight)>0||set.done);
+  if(!sets.length)return "";
+  const values=sets.map(set=>({reps:Number(set.reps)||0,weight:Number(set.weight)||0}));
+  const same=values.every(value=>value.reps===values[0].reps&&value.weight===values[0].weight);
+  if(same){
+    const {reps,weight}=values[0];
+    if(weight>0&&reps>0)return `${values.length}×${reps} @ ${weight} lb`;
+    if(reps>0)return `${values.length}×${reps} reps`;
+    return `${values.length} sets`;
+  }
+  const hasWeight=values.some(value=>value.weight>0);
+  if(!hasWeight)return `${values.map(value=>value.reps||"–").join(" / ")} reps`;
+  return values.map(value=>`${value.reps||"–"}×${value.weight||"–"}`).join(" / ");
+}
+function teacherStrengthSetCount(item){
+  const count=(item?.sets||[]).filter(set=>Number(set.reps)>0||Number(set.weight)>0||set.done).length;
+  return count?`${count} set${count===1?"":"s"}`:"";
 }
 function teacherCompletedMark(item){return item&&isDone(item)?"X":""}
 function teacherCardioForDate(date){
@@ -565,9 +575,12 @@ function teacherDateLabel(key){const date=dateFromKey(key);return `${date.getMon
 function teacherReportRow(row,dates,valueForDate){
   return {name:row.name,detail:teacherSetsReps(row.latest),values:dates.map(date=>valueForDate(row.byDate[date]))};
 }
-function buildTeacherSpreadsheetReport({student,goals,month}){
-  const weeks=teacherMonthWeeks(month);
-  if(!weeks.length)return {month,dates:[],pages:[]};
+function teacherStrengthReportRow(row,dates){
+  return {name:row.name,detail:teacherStrengthSetCount(row.latest),values:dates.map(date=>teacherStrengthValue(row.byDate[date]))};
+}
+function buildTeacherSpreadsheetReport({student,goals,beginDate,endDate}){
+  const weeks=teacherDateRangeWeeks(beginDate,endDate);
+  if(!weeks.length)return {beginDate,endDate,dates:[],pages:[]};
   const pages=weeks.map(({weekStart,dates})=>{
     const warm=teacherRows(dates,"warmup"),strength=teacherRows(dates,"strength"),flexibility=teacherRows(dates,"flexibility");
     const cardioByDate=dates.map(teacherCardioForDate);
@@ -576,20 +589,23 @@ function buildTeacherSpreadsheetReport({student,goals,month}){
       weekLabel:`${teacherDateLabel(weekStart)} - ${teacherDateLabel(teacherWeekKeys(weekStart)[6])}`,
       dates:dates.map(key=>({key,label:teacherDateLabel(key)})),
       warmup:warm.map(row=>teacherReportRow(row,dates,teacherCompletedMark)),
-      strength:strength.map(row=>teacherReportRow(row,dates,teacherExportWeight)),
+      strength:strength.map(row=>teacherStrengthReportRow(row,dates)),
       cardio:{names:cardioByDate.map(item=>item.name),heartRates:cardioByDate.map(item=>item.heartRate),minutes:cardioByDate.map(item=>item.minutes)},
       flexibility:flexibility.map(row=>teacherReportRow(row,dates,teacherCompletedMark))
     };
   });
-  return {student,goals,month,monthLabel:month,pages};
+  return {student,goals,beginDate,endDate,dateRangeLabel:`${teacherDateLabel(beginDate)} - ${teacherDateLabel(endDate)}`,pages};
 }
 function updateTeacherExportStatus(){
-  const month=$("teacherMonth").value||selectedDate.slice(0,7),dates=teacherMonthKeys(month).filter(key=>(state.workouts[key]?.items||[]).length),weeks=teacherMonthWeeks(month),status=$("teacherExportStatus");
-  status.textContent=dates.length?`${dates.length} workout date${dates.length===1?"":"s"} will be exported across ${weeks.length} calendar week${weeks.length===1?"":"s"}.`:`No workout records in ${month}.`;
+  const beginDate=$("teacherBeginDate").value,endDate=$("teacherEndDate").value,status=$("teacherExportStatus");
+  if(!beginDate||!endDate){status.textContent="Select beginning and ending dates.";return}
+  if(beginDate>endDate){status.textContent="Beginning date must be on or before ending date.";return}
+  const dates=teacherDateRangeKeys(beginDate,endDate).filter(key=>(state.workouts[key]?.items||[]).length),weeks=teacherDateRangeWeeks(beginDate,endDate);
+  status.textContent=dates.length?`${dates.length} workout date${dates.length===1?"":"s"} from ${weeks.length} calendar week${weeks.length===1?"":"s"} will be placed on one worksheet.`:"No workout records in this date range.";
 }
 function openTeacherExport(){
-  const saved=state.settings.teacherExport||{};
-  $("teacherStudentName").value=saved.student||"";$("teacherGoals").value=saved.goals||"";$("teacherMonth").value=selectedDate.slice(0,7);
+  const saved=state.settings.teacherExport||{},base=dateFromKey(selectedDate),monthStart=new Date(base.getFullYear(),base.getMonth(),1,12),monthEnd=new Date(base.getFullYear(),base.getMonth()+1,0,12);
+  $("teacherStudentName").value=saved.student||"";$("teacherGoals").value=saved.goals||"";$("teacherBeginDate").value=keyFromDate(monthStart);$("teacherEndDate").value=keyFromDate(monthEnd);
   updateTeacherExportStatus();showDialog("teacherExportDialog");
 }
 
@@ -876,11 +892,13 @@ $("librarySearch").oninput=renderLibrary;
 $("addPlanBtn").onclick=()=>openPlan();$("planCategorySelect").onchange=()=>{populatePlanExerciseOptions();updatePlanFields();intervalDraft=[10,10];renderPlanIntervals()};$("addPlanCardioIntervalBtn").onclick=()=>{intervalDraft.push(intervalDraft.at(-1)||10);renderPlanIntervals()};$("addPlanItemInlineBtn").onclick=addCurrentPlanItem;
 $("planForm").onsubmit=e=>{e.preventDefault();planDraft.name=$("planName").value.trim();planDraft.notes=$("planNotes").value.trim();if(!planDraft.name)return;planDraft.id=planDraft.id||uid();const i=state.plans.findIndex(x=>x.id===planDraft.id);if(i>=0)state.plans[i]=structuredClone(planDraft);else state.plans.push(structuredClone(planDraft));closeDialog("planDialog");persist()};
 $("openTeacherExportBtn").onclick=openTeacherExport;
-$("teacherMonth").onchange=updateTeacherExportStatus;
+$("teacherBeginDate").onchange=updateTeacherExportStatus;
+$("teacherEndDate").onchange=updateTeacherExportStatus;
 $("teacherExportForm").onsubmit=event=>{
   event.preventDefault();
-  const student=$("teacherStudentName").value.trim(),goals=$("teacherGoals").value.trim(),month=$("teacherMonth").value;
-  const report=buildTeacherSpreadsheetReport({student,goals,month});
+  const student=$("teacherStudentName").value.trim(),goals=$("teacherGoals").value.trim(),beginDate=$("teacherBeginDate").value,endDate=$("teacherEndDate").value;
+  if(!beginDate||!endDate||beginDate>endDate){updateTeacherExportStatus();return}
+  const report=buildTeacherSpreadsheetReport({student,goals,beginDate,endDate});
   if(!report.pages.length){updateTeacherExportStatus();return}
   state.settings.teacherExport={student,goals};saveState(state);
   try{

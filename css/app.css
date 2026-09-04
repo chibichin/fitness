@@ -29,7 +29,8 @@ dialog{border:0;border-radius:18px;padding:0;width:min(92vw,480px);max-height:90
 #addToStatus{min-height:18px;margin:0}
 @media(max-width:420px){.dialog-actions-wrap button{flex:1 1 130px}.dialog-actions-wrap button:first-child{flex-basis:100%}.list-card .library-actions button{flex-basis:100px}}
 
-.date-input-wrap{display:flex;width:100%;min-width:0;border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px}.date-input-wrap input{display:block;width:100%;min-width:0;border:0;border-radius:0;background:transparent;padding:0}.teacher-export-note{margin:0;line-height:1.45}
+.date-input-wrap{display:flex;width:100%;min-width:0;border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px}.date-input-wrap input{display:block;width:100%;min-width:0;border:0;border-radius:0;background:transparent;padding:0}.teacher-range-field{display:grid;gap:7px}.field-label{font-weight:700}.teacher-date-range{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:9px;align-items:end}.teacher-date-range label{min-width:0}.teacher-date-separator{padding-bottom:12px;color:var(--muted);font-weight:700}.teacher-export-note{margin:0;line-height:1.45}
+@media(max-width:360px){.teacher-date-range{grid-template-columns:1fr}.teacher-date-separator{display:none}}
 
 
 /* v1.4 muscle tracking */
