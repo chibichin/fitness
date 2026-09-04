@@ -491,14 +491,31 @@ function renderProgress(){
 }
 
 
-// Teacher weekly spreadsheet export. The workbook keeps the teacher's
-// exercise / sets-reps / date-column arrangement and landscape Letter setup.
+// Teacher monthly spreadsheet export. Each worksheet is one calendar week so
+// every workout section for a date stays together in the teacher's layout.
 function dateFromKey(key){return new Date(`${key}T12:00:00`)}
 function teacherWeekKeys(containingDate){
   const base=dateFromKey(containingDate),start=new Date(base);start.setDate(base.getDate()-base.getDay());
   return Array.from({length:7},(_,index)=>{const day=new Date(start);day.setDate(start.getDate()+index);return keyFromDate(day)});
 }
-function teacherWorkoutDates(containingDate){return teacherWeekKeys(containingDate).filter(key=>(state.workouts[key]?.items||[]).length)}
+function teacherMonthKeys(month){
+  const match=/(\d{4})-(\d{2})/.exec(String(month||""));
+  if(!match)return [];
+  const year=Number(match[1]),monthIndex=Number(match[2])-1;
+  if(monthIndex<0||monthIndex>11)return [];
+  const cursor=new Date(year,monthIndex,1,12),keys=[];
+  while(cursor.getFullYear()===year&&cursor.getMonth()===monthIndex){keys.push(keyFromDate(cursor));cursor.setDate(cursor.getDate()+1)}
+  return keys;
+}
+function teacherMonthWeeks(month){
+  const groups=new Map();
+  teacherMonthKeys(month).filter(key=>(state.workouts[key]?.items||[]).length).forEach(key=>{
+    const weekStart=teacherWeekKeys(key)[0];
+    if(!groups.has(weekStart))groups.set(weekStart,[]);
+    groups.get(weekStart).push(key);
+  });
+  return [...groups.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([weekStart,dates])=>({weekStart,dates}));
+}
 function teacherItemKey(item){return item.exerciseId||`name:${normalizeName(item.exerciseName||"Exercise")}`}
 function teacherRows(dates,category){
   const rows=new Map();
@@ -548,35 +565,31 @@ function teacherDateLabel(key){const date=dateFromKey(key);return `${date.getMon
 function teacherReportRow(row,dates,valueForDate){
   return {name:row.name,detail:teacherSetsReps(row.latest),values:dates.map(date=>valueForDate(row.byDate[date]))};
 }
-function buildTeacherSpreadsheetReport({student,goals,containingDate}){
-  const dates=teacherWorkoutDates(containingDate),week=teacherWeekKeys(containingDate);
-  if(!dates.length)return {dates:[],pages:[]};
-  const warm=teacherRows(dates,"warmup"),strength=teacherRows(dates,"strength"),flexibility=teacherRows(dates,"flexibility");
-  const capacities={warmup:11,strength:12,flexibility:3};
-  const pageCount=Math.max(1,Math.ceil(warm.length/capacities.warmup),Math.ceil(strength.length/capacities.strength),Math.ceil(flexibility.length/capacities.flexibility));
-  const cardioByDate=dates.map(teacherCardioForDate);
-  const pages=Array.from({length:pageCount},(_,pageIndex)=>({
-    warmup:warm.slice(pageIndex*capacities.warmup,(pageIndex+1)*capacities.warmup).map(row=>teacherReportRow(row,dates,teacherCompletedMark)),
-    strength:strength.slice(pageIndex*capacities.strength,(pageIndex+1)*capacities.strength).map(row=>teacherReportRow(row,dates,teacherExportWeight)),
-    cardio:pageIndex===0?{
-      names:cardioByDate.map(item=>item.name),
-      heartRates:cardioByDate.map(item=>item.heartRate),
-      minutes:cardioByDate.map(item=>item.minutes)
-    }:{names:[],heartRates:[],minutes:[]},
-    flexibility:flexibility.slice(pageIndex*capacities.flexibility,(pageIndex+1)*capacities.flexibility).map(row=>teacherReportRow(row,dates,teacherCompletedMark))
-  }));
-  return {
-    student,goals,weekStart:week[0],weekLabel:`${teacherDateLabel(week[0])} - ${teacherDateLabel(week[6])}`,
-    dates:dates.map(key=>({key,label:teacherDateLabel(key)})),pages
-  };
+function buildTeacherSpreadsheetReport({student,goals,month}){
+  const weeks=teacherMonthWeeks(month);
+  if(!weeks.length)return {month,dates:[],pages:[]};
+  const pages=weeks.map(({weekStart,dates})=>{
+    const warm=teacherRows(dates,"warmup"),strength=teacherRows(dates,"strength"),flexibility=teacherRows(dates,"flexibility");
+    const cardioByDate=dates.map(teacherCardioForDate);
+    return {
+      weekStart,
+      weekLabel:`${teacherDateLabel(weekStart)} - ${teacherDateLabel(teacherWeekKeys(weekStart)[6])}`,
+      dates:dates.map(key=>({key,label:teacherDateLabel(key)})),
+      warmup:warm.map(row=>teacherReportRow(row,dates,teacherCompletedMark)),
+      strength:strength.map(row=>teacherReportRow(row,dates,teacherExportWeight)),
+      cardio:{names:cardioByDate.map(item=>item.name),heartRates:cardioByDate.map(item=>item.heartRate),minutes:cardioByDate.map(item=>item.minutes)},
+      flexibility:flexibility.map(row=>teacherReportRow(row,dates,teacherCompletedMark))
+    };
+  });
+  return {student,goals,month,monthLabel:month,pages};
 }
 function updateTeacherExportStatus(){
-  const key=$("teacherWeekDate").value||selectedDate,dates=teacherWorkoutDates(key),status=$("teacherExportStatus");
-  status.textContent=dates.length?`${dates.length} workout date${dates.length===1?"":"s"} will be exported: ${dates.map(teacherDateLabel).join(", ")}.`:"No workout records in this week.";
+  const month=$("teacherMonth").value||selectedDate.slice(0,7),dates=teacherMonthKeys(month).filter(key=>(state.workouts[key]?.items||[]).length),weeks=teacherMonthWeeks(month),status=$("teacherExportStatus");
+  status.textContent=dates.length?`${dates.length} workout date${dates.length===1?"":"s"} will be exported across ${weeks.length} calendar week${weeks.length===1?"":"s"}.`:`No workout records in ${month}.`;
 }
 function openTeacherExport(){
   const saved=state.settings.teacherExport||{};
-  $("teacherStudentName").value=saved.student||"";$("teacherGoals").value=saved.goals||"";$("teacherWeekDate").value=selectedDate;
+  $("teacherStudentName").value=saved.student||"";$("teacherGoals").value=saved.goals||"";$("teacherMonth").value=selectedDate.slice(0,7);
   updateTeacherExportStatus();showDialog("teacherExportDialog");
 }
 
@@ -604,7 +617,7 @@ async function downloadFullBackup(){
   button.disabled=true;button.textContent="Preparing photos…";
   try{
     const backup=structuredClone(state),photos=new Map((await getAllPhotos()).map(record=>[record.id,record]));
-    backup.version="1.4.8";
+    backup.version="1.4.9";
     backup.backupType="full";
     for(const exercise of backup.exercises||[]){
       const record=exercise.photoId?photos.get(exercise.photoId):null;
@@ -622,7 +635,7 @@ async function downloadFullBackup(){
 async function prepareRestoredBackup(restored){
   const prepared=structuredClone(restored),photoEntries=[];
   let originalBytes=0,storedBytes=0;
-  prepared.version="1.4.8";
+  prepared.version="1.4.9";
   delete prepared.backupType;
   for(const exercise of prepared.exercises||[]){
     const legacyPhoto=String(exercise.photo||"");
@@ -863,12 +876,12 @@ $("librarySearch").oninput=renderLibrary;
 $("addPlanBtn").onclick=()=>openPlan();$("planCategorySelect").onchange=()=>{populatePlanExerciseOptions();updatePlanFields();intervalDraft=[10,10];renderPlanIntervals()};$("addPlanCardioIntervalBtn").onclick=()=>{intervalDraft.push(intervalDraft.at(-1)||10);renderPlanIntervals()};$("addPlanItemInlineBtn").onclick=addCurrentPlanItem;
 $("planForm").onsubmit=e=>{e.preventDefault();planDraft.name=$("planName").value.trim();planDraft.notes=$("planNotes").value.trim();if(!planDraft.name)return;planDraft.id=planDraft.id||uid();const i=state.plans.findIndex(x=>x.id===planDraft.id);if(i>=0)state.plans[i]=structuredClone(planDraft);else state.plans.push(structuredClone(planDraft));closeDialog("planDialog");persist()};
 $("openTeacherExportBtn").onclick=openTeacherExport;
-$("teacherWeekDate").onchange=updateTeacherExportStatus;
+$("teacherMonth").onchange=updateTeacherExportStatus;
 $("teacherExportForm").onsubmit=event=>{
   event.preventDefault();
-  const student=$("teacherStudentName").value.trim(),goals=$("teacherGoals").value.trim(),containingDate=$("teacherWeekDate").value;
-  const report=buildTeacherSpreadsheetReport({student,goals,containingDate});
-  if(!report.dates.length){updateTeacherExportStatus();return}
+  const student=$("teacherStudentName").value.trim(),goals=$("teacherGoals").value.trim(),month=$("teacherMonth").value;
+  const report=buildTeacherSpreadsheetReport({student,goals,month});
+  if(!report.pages.length){updateTeacherExportStatus();return}
   state.settings.teacherExport={student,goals};saveState(state);
   try{
     const result=downloadTeacherWorkbook(report);

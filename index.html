@@ -78,8 +78,8 @@
     <div class="page-heading"><h2>Settings</h2></div>
     <article class="card">
       <h3>Teacher Spreadsheet</h3>
-      <p class="muted">Export one week of workout records in the Canada Workout Program Weekly arrangement.</p>
-      <button id="openTeacherExportBtn" class="full">Export weekly spreadsheet</button>
+      <p class="muted">Export a selected month of workout records in the Canada Workout Program Weekly arrangement. Each calendar week is kept on one worksheet.</p>
+      <button id="openTeacherExportBtn" class="full">Export monthly spreadsheet</button>
     </article>
     <article class="card">
       <h3>Data</h3>
@@ -91,7 +91,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-      <p class="muted">Version 1.4.8 — Previous final-set prefill, text-readable photo optimization, separate photo storage, full backup, and improved touch reordering.</p>
+    <p class="muted">Version 1.4.9 — Monthly teacher spreadsheet export and one-page-per-week layout.</p>
     </article>
   </section>
 </main>
@@ -279,15 +279,15 @@
 
 <dialog id="teacherExportDialog">
   <form id="teacherExportForm">
-    <div class="dialog-title"><h3>Export weekly spreadsheet</h3><button type="button" class="secondary icon-button" data-close="teacherExportDialog">×</button></div>
+    <div class="dialog-title"><h3>Export monthly spreadsheet</h3><button type="button" class="secondary icon-button" data-close="teacherExportDialog">×</button></div>
     <label><span>Student</span><input id="teacherStudentName" autocomplete="name" required></label>
     <label><span>Goals</span><textarea id="teacherGoals" placeholder="Weekly workout goals"></textarea></label>
-    <label><span>Week containing</span><div class="date-input-wrap"><input id="teacherWeekDate" type="date" required></div></label>
-    <p class="muted teacher-export-note">Only dates with workout records are included. The Excel workbook keeps the teacher's section and date-column arrangement and is set to landscape Letter for printing.</p>
+    <label><span>Month</span><div class="date-input-wrap"><input id="teacherMonth" type="month" required></div></label>
+    <p class="muted teacher-export-note">Only dates with workout records are included. Each calendar week in the selected month gets one worksheet, keeping all sections for the same date together. The workbook keeps the teacher's arrangement and is set to landscape Letter for printing.</p>
     <p id="teacherExportStatus" class="muted field-hint" aria-live="polite"></p>
     <div class="dialog-actions">
       <button type="button" class="secondary" data-close="teacherExportDialog">Cancel</button>
-      <button type="submit">Download spreadsheet</button>
+      <button type="submit">Download monthly spreadsheet</button>
     </div>
   </form>
 </dialog>

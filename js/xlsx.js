@@ -42,34 +42,40 @@ function activityRow(index,row,dateCount,{boldMarks=false,small=false}={}){
 }
 
 function worksheetXml(report,page,pageIndex){
-  const dates=report.dates||[],dateCount=Math.min(dates.length,9),rows=[];
+  const dates=page.dates||report.dates||[],dateCount=Math.min(dates.length,9),rows=[];
   rows.push(rowXml(1,27,[cellXml(1,1,"Canada College",1)]));
-  rows.push(rowXml(2,18,[cellXml(2,1,"Professor R. Marquez",2),cellXml(2,9,report.pages.length>1?`Page ${pageIndex+1} of ${report.pages.length}`:"",11)]));
+  const pageLabel=report.month?(report.pages.length>1?`${report.month} · Week ${pageIndex+1} of ${report.pages.length}`:report.month):(report.pages.length>1?`Week ${pageIndex+1} of ${report.pages.length}`:"");
+  rows.push(rowXml(2,18,[cellXml(2,1,"Professor R. Marquez",2),cellXml(2,9,pageLabel,11)]));
   rows.push(rowXml(3,18,[cellXml(3,1,"Student:",2),cellXml(3,2,report.student||"",3)]));
   rows.push(rowXml(4,24,[cellXml(4,1,"Goals:",3),cellXml(4,2,report.goals||"",3)]));
   rows.push(rowXml(5,10,[]));
 
+  let rowIndex=6;
   const warmHeader=["WARM-EXERCISES","Reps"];
   for(let slot=0;slot<9;slot++)warmHeader.push(slot<dateCount?dates[slot].label:"");
-  rows.push(gridRow(6,20,warmHeader,{1:4,2:5,default:6}));
-  for(let index=0;index<11;index++)rows.push(activityRow(7+index,page.warmup[index],dateCount,{boldMarks:true}));
+  rows.push(gridRow(rowIndex++,20,warmHeader,{1:4,2:5,default:6}));
+  const warmRows=page.warmup?.length?page.warmup:[null];
+  warmRows.forEach(item=>rows.push(activityRow(rowIndex++,18,item,dateCount,{boldMarks:true})));
 
-  rows.push(gridRow(18,20,["STRENGTH","Sets/Reps","","","","","","","","",""] ,{1:4,2:5,default:8}));
-  for(let index=0;index<12;index++)rows.push(activityRow(19+index,page.strength[index],dateCount));
+  rows.push(gridRow(rowIndex++,20,["STRENGTH","Sets/Reps","","","","","","","","",""] ,{1:4,2:5,default:8}));
+  const strengthRows=page.strength?.length?page.strength:[null];
+  strengthRows.forEach(item=>rows.push(activityRow(rowIndex++,18,item,dateCount)));
 
-  rows.push(gridRow(31,20,["CARDIOVASCULAR","",...(page.cardio?.names||[])],{1:4,2:8,default:10}));
-  rows.push(gridRow(32,20,["Target Heart Rate Range","",...(page.cardio?.heartRates||[])],{1:7,2:8,default:8}));
-  rows.push(gridRow(33,20,["Duration (min)","",...(page.cardio?.minutes||[])],{1:7,2:8,default:8}));
+  rows.push(gridRow(rowIndex++,20,["CARDIOVASCULAR","",...(page.cardio?.names||[])],{1:4,2:8,default:10}));
+  rows.push(gridRow(rowIndex++,20,["Target Heart Rate Range","",...(page.cardio?.heartRates||[])],{1:7,2:8,default:8}));
+  rows.push(gridRow(rowIndex++,20,["Duration (min)","",...(page.cardio?.minutes||[])],{1:7,2:8,default:8}));
 
-  rows.push(gridRow(34,20,["FLEXIBILITY","","","","","","","","","",""] ,{1:4,2:8,default:8}));
-  for(let index=0;index<3;index++)rows.push(activityRow(35+index,page.flexibility[index],dateCount,{boldMarks:true}));
+  rows.push(gridRow(rowIndex++,20,["FLEXIBILITY","","","","","","","","","",""] ,{1:4,2:8,default:8}));
+  const flexibilityRows=page.flexibility?.length?page.flexibility:[null];
+  flexibilityRows.forEach(item=>rows.push(activityRow(rowIndex++,18,item,dateCount,{boldMarks:true})));
+  const lastRow=rowIndex-1;
 
   const merges=["A1:D1","A2:D2","I2:K2","B3:E3","B4:K4"];
   const cols=['<col min="1" max="1" width="29" customWidth="1"/>','<col min="2" max="2" width="9" customWidth="1"/>','<col min="3" max="11" width="10.7" customWidth="1"/>'].join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
-  <dimension ref="A1:K37"/>
+  <dimension ref="A1:K${lastRow}"/>
   <sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews>
   <sheetFormatPr defaultRowHeight="18"/>
   <cols>${cols}</cols>
@@ -113,9 +119,9 @@ function stylesXml(){
 </styleSheet>`;
 }
 
-function workbookXml(sheetNames){
+function workbookXml(sheetNames,pageRows){
   const sheets=sheetNames.map((name,index)=>`<sheet name="${xmlEscape(name)}" sheetId="${index+1}" r:id="rId${index+1}"/>`).join("");
-  const printAreas=sheetNames.map((name,index)=>`<definedName name="_xlnm.Print_Area" localSheetId="${index}">'${name.replace(/'/g,"''")}'!$A$1:$K$37</definedName>`).join("");
+  const printAreas=sheetNames.map((name,index)=>`<definedName name="_xlnm.Print_Area" localSheetId="${index}">'${name.replace(/'/g,"''")}'!$A$1:$K$${pageRows[index]}</definedName>`).join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="14000"/></bookViews>
@@ -189,18 +195,19 @@ function zipStore(files){
 }
 
 function safeFilenamePart(value){
-  return String(value||"").trim().replace(/[\\/:*?"<>|]+/g,"-").replace(/\s+/g,"-").replace(/^-+|-+$/g,"")||"weekly";
+  return String(value||"").trim().replace(/[\\/:*?"<>|]+/g,"-").replace(/\s+/g,"-").replace(/^-+|-+$/g,"")||"monthly";
 }
 
 export function createTeacherWorkbookBlob(report){
   const pages=report.pages?.length?report.pages:[{warmup:[],strength:[],flexibility:[],cardio:{names:[],heartRates:[],minutes:[]}}];
-  const sheetNames=pages.map((_,index)=>index===0?"Weekly Program":`Weekly Program ${index+1}`);
+  const sheetNames=pages.map((_,index)=>`Week ${index+1}`);
+  const pageRows=pages.map(page=>5+1+Math.max(1,page.warmup?.length||0)+1+Math.max(1,page.strength?.length||0)+3+1+Math.max(1,page.flexibility?.length||0));
   const files=[
     {name:"[Content_Types].xml",data:contentTypesXml(pages.length)},
     {name:"_rels/.rels",data:rootRelsXml()},
     {name:"docProps/app.xml",data:appPropsXml(sheetNames)},
     {name:"docProps/core.xml",data:corePropsXml()},
-    {name:"xl/workbook.xml",data:workbookXml(sheetNames)},
+    {name:"xl/workbook.xml",data:workbookXml(sheetNames,pageRows)},
     {name:"xl/_rels/workbook.xml.rels",data:workbookRelsXml(pages.length)},
     {name:"xl/styles.xml",data:stylesXml()}
   ];
@@ -209,9 +216,9 @@ export function createTeacherWorkbookBlob(report){
 }
 
 export function downloadTeacherWorkbook(report){
-  const blob=createTeacherWorkbookBlob(report),anchor=document.createElement("a"),week=safeFilenamePart(report.weekStart||"weekly"),student=safeFilenamePart(report.student||"student");
+  const blob=createTeacherWorkbookBlob(report),anchor=document.createElement("a"),month=safeFilenamePart(report.month||"monthly"),student=safeFilenamePart(report.student||"student");
   anchor.href=URL.createObjectURL(blob);
-  anchor.download=`canada-workout-program-${student}-${week}.xlsx`;
+  anchor.download=`canada-workout-program-${student}-${month}.xlsx`;
   document.body.appendChild(anchor);anchor.click();anchor.remove();
   setTimeout(()=>URL.revokeObjectURL(anchor.href),1500);
   return {filename:anchor.download,size:blob.size};
