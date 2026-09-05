@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111827">
   <title>Fitness Record</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/app.css?v=1.4.14">
+  <link rel="stylesheet" href="css/app.css?v=1.4.16">
 </head>
 <body>
 <header class="topbar">
@@ -91,7 +91,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-    <p class="muted">Version 1.4.14 — Exercise variations with independent history.</p>
+    <p class="muted">Version 1.4.16 — Simplified exercise editor.</p>
     </article>
   </section>
 </main>
@@ -141,12 +141,7 @@
   <form id="exerciseForm">
     <div class="dialog-title"><h3 id="exerciseDialogTitle">Add exercise</h3><button type="button" class="secondary icon-button" data-close="exerciseDialog">×</button></div>
     <input id="exerciseId" type="hidden">
-    <input id="exerciseFamilyId" type="hidden">
-    <div class="two-col">
-      <label><span>Exercise name</span><input id="exerciseName" required placeholder="Dead Bug"></label>
-      <label><span>Variation <small class="optional-label">optional</small></span><input id="exerciseVariationName" placeholder="Basic, Heel Tap…"></label>
-    </div>
-    <p class="muted field-help">Each variation is saved as a separate exercise with its own workout history, previous weight, photo, notes, and muscle details.</p>
+    <label><span>Exercise name</span><input id="exerciseName" required></label>
     <label><span>Category</span>
       <select id="exerciseCategory">
         <option value="warmup">Warm up</option>
@@ -260,7 +255,9 @@
         <option value="flexibility">Flexibility</option>
       </select>
     </label>
+    <label><span>Search exercises</span><input id="planExerciseSearch" type="search" placeholder="Name, muscle, equipment, or movement"></label>
     <label><span>Exercise</span><select id="planExerciseSelect"></select></label>
+    <p id="planExerciseSearchStatus" class="muted field-hint" aria-live="polite"></p>
 
     <div id="planStrengthFields" class="two-col">
       <label><span>Sets</span><input id="planSets" type="number" min="1" value="2"></label>
@@ -332,6 +329,6 @@
 </dialog>
 
 
-<script type="module" src="js/app.js?v=1.4.14"></script>
+<script type="module" src="js/app.js?v=1.4.16"></script>
 </body>
 </html>
