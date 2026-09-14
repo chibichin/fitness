@@ -652,6 +652,8 @@ async function switchLocalAccount(accountId){
 function renderCloudSyncStatus(next=latestCloudStatus){
   latestCloudStatus=next;
   const info=cloudSyncInfo(),statusHost=$("cloudSyncStatus");
+  $("appTitle").textContent=info.displayName||"Fitness Record";
+  document.title=info.displayName||"Fitness Record";
   const locked=!next.signedIn||next.kind==="account-mismatch";
   document.body.classList.toggle("cloud-locked",locked);
   if(locked){
@@ -662,7 +664,7 @@ function renderCloudSyncStatus(next=latestCloudStatus){
   statusHost.textContent=next.message;statusHost.dataset.kind=next.kind;
   $("cloudAuthFields").classList.toggle("hidden",!next.configured||next.signedIn);
   $("cloudSignedInActions").classList.toggle("hidden",!next.signedIn);
-  $("cloudAccount").textContent=info.email?`Signed in as ${info.email}`:"";
+  $("cloudAccount").textContent=info.email?(info.displayName?`Signed in as ${info.displayName} · ${info.email}`:`Signed in as ${info.email}`):"";
   $("cloudInitializeBtn").classList.toggle("hidden",next.kind!=="needs-initialization");
 }
 async function runCloudAction(button,action){
@@ -892,12 +894,12 @@ $("teacherExportForm").onsubmit=event=>{
   }
 };
 function cloudCredentials(){
-  const email=$("cloudEmail").value.trim(),password=$("cloudPassword").value;
+  const displayName=$("cloudDisplayName").value.trim(),email=$("cloudEmail").value.trim(),password=$("cloudPassword").value;
   if(!email||!password)throw new Error("Enter your email and password.");
-  return {email,password};
+  return {displayName,email,password};
 }
-$("cloudSignInBtn").onclick=()=>runCloudAction($("cloudSignInBtn"),()=>signIn(...Object.values(cloudCredentials())));
-$("cloudCreateAccountBtn").onclick=()=>runCloudAction($("cloudCreateAccountBtn"),()=>signUp(...Object.values(cloudCredentials())));
+$("cloudSignInBtn").onclick=()=>runCloudAction($("cloudSignInBtn"),()=>{const {email,password}=cloudCredentials();return signIn(email,password)});
+$("cloudCreateAccountBtn").onclick=()=>runCloudAction($("cloudCreateAccountBtn"),()=>{const {displayName,email,password}=cloudCredentials();if(!displayName)throw new Error("Enter a display name for the new account.");return signUp(displayName,email,password)});
 $("cloudInitializeBtn").onclick=()=>runCloudAction($("cloudInitializeBtn"),initializeCloud);
 $("cloudSyncNowBtn").onclick=()=>runCloudAction($("cloudSyncNowBtn"),syncNow);
 $("cloudSignOutBtn").onclick=()=>runCloudAction($("cloudSignOutBtn"),signOut);

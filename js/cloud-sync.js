@@ -98,10 +98,11 @@ async function runSync({initialize=false}={}){
   finally{busy=false;if(queued){queued=false;scheduleSync(300)}}
 }
 function scheduleSync(delay=700){clearTimeout(saveTimer);saveTimer=setTimeout(()=>runSync(),delay)}
-export function cloudSyncInfo(){return {configured,signedIn:Boolean(session),email:session?.user?.email||""}}
-export async function signUp(email,password){
+function displayName(){return String(session?.user?.user_metadata?.display_name||session?.user?.raw_user_meta_data?.display_name||"").trim()}
+export function cloudSyncInfo(){return {configured,signedIn:Boolean(session),email:session?.user?.email||"",displayName:displayName()}}
+export async function signUp(displayName,email,password){
   const redirectTo=new URL("./",window.location.href).href;
-  const result=await rawRequest(`/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTo)}`,{method:"POST",token:"",body:{email,password}});
+  const result=await rawRequest(`/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTo)}`,{method:"POST",token:"",body:{email,password,data:{display_name:displayName}}});
   if(result.access_token){rememberSession(result);await runSync()}
   else status("signed-out","Check your email to confirm the account, then sign in.");
 }
