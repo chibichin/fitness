@@ -625,6 +625,11 @@ function renderAll(){renderHeader();renderWeek();renderWorkout();renderPlans();r
 function renderCloudSyncStatus(next=latestCloudStatus){
   latestCloudStatus=next;
   const info=cloudSyncInfo(),statusHost=$("cloudSyncStatus");
+  document.body.classList.toggle("cloud-locked",!next.signedIn);
+  if(!next.signedIn){
+    document.querySelectorAll(".bottom-nav button").forEach(button=>button.classList.toggle("active",button.dataset.view==="settingsView"));
+    document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id==="settingsView"));
+  }
   statusHost.textContent=next.message;statusHost.dataset.kind=next.kind;
   $("cloudAuthFields").classList.toggle("hidden",!next.configured||next.signedIn);
   $("cloudSignedInActions").classList.toggle("hidden",!next.signedIn);

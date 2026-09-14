@@ -111,7 +111,7 @@ export async function signIn(email,password){
 }
 export async function signOut(){
   try{if(session)await rawRequest("/auth/v1/logout",{method:"POST"})}catch{}
-  rememberSession(null);clearInterval(pollTimer);status("signed-out","Signed out. Data on this device remains available offline.");
+  rememberSession(null);clearInterval(pollTimer);status("signed-out","Signed out. Sign in to view your workout data.");
 }
 export function initializeCloud(){return runSync({initialize:true})}
 export function syncNow(){return runSync()}
