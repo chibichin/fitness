@@ -634,8 +634,9 @@ function activateView(viewId,{persist=true}={}){
 function renderCloudSyncStatus(next=latestCloudStatus){
   latestCloudStatus=next;
   const info=cloudSyncInfo(),statusHost=$("cloudSyncStatus");
-  document.body.classList.toggle("cloud-locked",!next.signedIn);
-  if(!next.signedIn){
+  const locked=!next.signedIn||next.kind==="account-mismatch";
+  document.body.classList.toggle("cloud-locked",locked);
+  if(locked){
     activateView("settingsView",{persist:false});viewRestored=false;
   }else if(!viewRestored){
     activateView(localStorage.getItem(VIEW_KEY)||"todayView");viewRestored=true;

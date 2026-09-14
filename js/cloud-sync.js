@@ -64,7 +64,11 @@ async function runSync({initialize=false}={}){
   if(busy){queued=true;return}
   busy=true;status("working","Syncing…");
   try{
-    let local=callbacks.getState(),localMeta=getSyncMeta(local),remote=await cloudRow();
+    let local=callbacks.getState(),localMeta=getSyncMeta(local),remote=await cloudRow(),owner=localStorage.getItem(OWNER_KEY);
+    if(owner&&owner!==session.user.id&&!remote){
+      status("account-mismatch","This device contains data from another account. Use a separate browser or device for this account.");
+      return;
+    }
     if(!remote&&!initialize){status("needs-initialization","Cloud is empty. On the computer with the official data, choose “Use this computer’s data”.");return}
     if(!remote){
       await uploadPhotos(local);
