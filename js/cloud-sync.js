@@ -7,7 +7,7 @@ const SESSION_KEY="fitness-record-cloud-session-v1";
 const OWNER_KEY="fitness-record-cloud-owner-v1";
 const configured=Boolean(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY);
 let session=null,busy=false,queued=false,saveTimer=null;
-let callbacks={getState:()=>null,applyState:()=>{},onStatus:()=>{}};
+let callbacks={getState:()=>null,switchAccount:async()=>{},applyState:()=>{},onStatus:()=>{}};
 
 function status(kind,message){callbacks.onStatus({kind,message,signedIn:Boolean(session),configured})}
 function rememberSession(value){
@@ -64,11 +64,9 @@ async function runSync({initialize=false}={}){
   if(busy){queued=true;return}
   busy=true;status("working","Syncing…");
   try{
-    let local=callbacks.getState(),localMeta=getSyncMeta(local),remote=await cloudRow(),owner=localStorage.getItem(OWNER_KEY);
-    if(owner&&owner!==session.user.id&&!remote){
-      status("account-mismatch","This device contains data from another account. Use a separate browser or device for this account.");
-      return;
-    }
+    const owner=localStorage.getItem(OWNER_KEY);
+    if(owner&&owner!==session.user.id)await callbacks.switchAccount(session.user.id);
+    let local=callbacks.getState(),localMeta=getSyncMeta(local),remote=await cloudRow();
     if(!remote&&!initialize){status("needs-initialization","Cloud is empty. On the computer with the official data, choose “Use this computer’s data”.");return}
     if(!remote){
       await uploadPhotos(local);

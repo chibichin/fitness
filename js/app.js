@@ -1,4 +1,4 @@
-import {loadState,saveState,uid} from "./storage.js?v=1.5.0";
+import {KEY,SYNC_META_KEY,loadState,makeDefaultState,saveState,uid} from "./storage.js?v=1.5.0";
 import {downloadTeacherWorkbook} from "./xlsx.js?v=1.5.0";
 import {compressPhotoFile,compressPhotoDataUrl,formatBytes} from "./photo.js?v=1.5.0";
 import {putPhoto,getAllPhotos,deletePhoto,photoStorageStats,requestPersistentPhotoStorage} from "./photo-store.js?v=1.5.0";
@@ -24,6 +24,9 @@ let addWorkoutExerciseSelection=new Set();
 let latestCloudStatus={kind:"setup",message:"Checking sync…",signedIn:false,configured:false};
 let viewRestored=false;
 const VIEW_KEY="fitness-record-active-view-v1";
+const LOCAL_ACCOUNT_KEY="fitness-record-local-account-v1";
+const ACCOUNT_STATE_PREFIX="fitness-record-account-state-v1-";
+const ACCOUNT_META_PREFIX="fitness-record-account-meta-v1-";
 
 const $=id=>document.getElementById(id);
 const sections=["warmup","strength","cardio","flexibility"];
@@ -631,6 +634,21 @@ function activateView(viewId,{persist=true}={}){
   if(persist)localStorage.setItem(VIEW_KEY,viewId);
 }
 
+async function switchLocalAccount(accountId){
+  const previousAccount=localStorage.getItem(LOCAL_ACCOUNT_KEY)||localStorage.getItem("fitness-record-cloud-owner-v1");
+  if(!previousAccount||previousAccount===accountId){localStorage.setItem(LOCAL_ACCOUNT_KEY,accountId);return}
+  const currentState=localStorage.getItem(KEY),currentMeta=localStorage.getItem(SYNC_META_KEY);
+  if(currentState)localStorage.setItem(`${ACCOUNT_STATE_PREFIX}${previousAccount}`,currentState);
+  if(currentMeta)localStorage.setItem(`${ACCOUNT_META_PREFIX}${previousAccount}`,currentMeta);
+  const nextState=localStorage.getItem(`${ACCOUNT_STATE_PREFIX}${accountId}`),nextMeta=localStorage.getItem(`${ACCOUNT_META_PREFIX}${accountId}`);
+  if(nextState)localStorage.setItem(KEY,nextState);else localStorage.removeItem(KEY);
+  if(nextMeta)localStorage.setItem(SYNC_META_KEY,nextMeta);else localStorage.removeItem(SYNC_META_KEY);
+  state=nextState?loadState():makeDefaultState();
+  if(!nextState)saveState(state);
+  localStorage.setItem(LOCAL_ACCOUNT_KEY,accountId);
+  await refreshExercisePhotoUrls();renderAll();
+}
+
 function renderCloudSyncStatus(next=latestCloudStatus){
   latestCloudStatus=next;
   const info=cloudSyncInfo(),statusHost=$("cloudSyncStatus");
@@ -900,6 +918,7 @@ async function initializeApp(){
   renderAll();
   initializeCloudSync({
     getState:()=>state,
+    switchAccount:switchLocalAccount,
     applyState:async next=>{state=next;await refreshExercisePhotoUrls();renderAll()},
     onStatus:renderCloudSyncStatus
   });
