@@ -22,6 +22,8 @@ let addWorkoutPlanId="";
 let addWorkoutPlanSelection=new Set();
 let addWorkoutExerciseSelection=new Set();
 let latestCloudStatus={kind:"setup",message:"Checking sync…",signedIn:false,configured:false};
+let viewRestored=false;
+const VIEW_KEY="fitness-record-active-view-v1";
 
 const $=id=>document.getElementById(id);
 const sections=["warmup","strength","cardio","flexibility"];
@@ -622,13 +624,21 @@ async function migrateLegacyPhotos(){
 
 function renderAll(){renderHeader();renderWeek();renderWorkout();renderPlans();renderLibrary();renderProgress();renderStorageUsage()}
 
+function activateView(viewId,{persist=true}={}){
+  const target=$(viewId);if(!target)return;
+  document.querySelectorAll(".bottom-nav button").forEach(button=>button.classList.toggle("active",button.dataset.view===viewId));
+  document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id===viewId));
+  if(persist)localStorage.setItem(VIEW_KEY,viewId);
+}
+
 function renderCloudSyncStatus(next=latestCloudStatus){
   latestCloudStatus=next;
   const info=cloudSyncInfo(),statusHost=$("cloudSyncStatus");
   document.body.classList.toggle("cloud-locked",!next.signedIn);
   if(!next.signedIn){
-    document.querySelectorAll(".bottom-nav button").forEach(button=>button.classList.toggle("active",button.dataset.view==="settingsView"));
-    document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id==="settingsView"));
+    activateView("settingsView",{persist:false});viewRestored=false;
+  }else if(!viewRestored){
+    activateView(localStorage.getItem(VIEW_KEY)||"todayView");viewRestored=true;
   }
   statusHost.textContent=next.message;statusHost.dataset.kind=next.kind;
   $("cloudAuthFields").classList.toggle("hidden",!next.configured||next.signedIn);
@@ -733,7 +743,7 @@ function syncModalLock(){
   document.body.classList.toggle("modal-open",Boolean(document.querySelector("dialog[open]")));
 }
 
-document.querySelectorAll(".bottom-nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll(".bottom-nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));$(b.dataset.view).classList.add("active");renderAll()});
+document.querySelectorAll(".bottom-nav button").forEach(b=>b.onclick=()=>{if(document.body.classList.contains("cloud-locked")&&b.dataset.view!=="settingsView")return;activateView(b.dataset.view);renderAll()});
 $("referenceZoomBtn").onclick=()=>{
   const viewport=$("referenceImageViewport"),zoomed=viewport.classList.toggle("zoomed");
   $("referenceZoomBtn").textContent=zoomed?"Fit photo to screen":"View full-size photo";
