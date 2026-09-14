@@ -117,11 +117,12 @@ export async function replaceAllPhotos(entries,{silent=false}={}){
   if(!silent)notifyPhotoChange("replace");
 }
 
-export async function photoStorageStats(){
-  const records=await getAllPhotos();
+export async function photoStorageStats(ids=null){
+  const records=await getAllPhotos(),selected=ids?new Set(ids.map(String)):null;
+  const visible=selected?records.filter(record=>selected.has(String(record.id))):records;
   return {
-    count:records.length,
-    bytes:records.reduce((sum,record)=>sum+(Number(record.size)||record.blob?.size||0),0)
+    count:visible.length,
+    bytes:visible.reduce((sum,record)=>sum+(Number(record.size)||record.blob?.size||0),0)
   };
 }
 

@@ -600,7 +600,7 @@ async function renderStorageUsage(){
   const host=$("storageUsage");if(!host)return;
   const json=JSON.stringify(state),appBytes=new Blob([json]).size;
   try{
-    const photos=await photoStorageStats();
+    const photos=await photoStorageStats((state.exercises||[]).map(ex=>ex.photoId).filter(Boolean));
     host.textContent=`App data: approximately ${formatBytes(appBytes)} · ${photos.count} saved photo${photos.count===1?"":"s"}: ${formatBytes(photos.bytes)}. Photos are stored separately from app data.`;
   }catch{
     host.textContent=`App data: approximately ${formatBytes(appBytes)}. Photo storage is temporarily unavailable.`;
