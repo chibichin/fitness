@@ -100,7 +100,8 @@ function startPolling(){clearInterval(pollTimer);pollTimer=setInterval(()=>{if(d
 
 export function cloudSyncInfo(){return {configured,signedIn:Boolean(session),email:session?.user?.email||""}}
 export async function signUp(email,password){
-  const result=await rawRequest("/auth/v1/signup",{method:"POST",token:"",body:{email,password}});
+  const redirectTo=new URL("./",window.location.href).href;
+  const result=await rawRequest(`/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTo)}`,{method:"POST",token:"",body:{email,password}});
   if(result.access_token){rememberSession(result);await runSync()}
   else status("signed-out","Check your email to confirm the account, then sign in.");
 }
