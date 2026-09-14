@@ -900,8 +900,21 @@ function cloudCredentials({forSignUp=false}={}){
   if(forSignUp&&!displayName)throw new Error("Enter a display name.");
   return {displayName,email,password};
 }
-$("cloudSignInBtn").onclick=()=>runCloudAction($("cloudSignInBtn"),()=>{const {email,password}=cloudCredentials();return signIn(email,password)});
-$("cloudCreateAccountBtn").onclick=()=>runCloudAction($("cloudCreateAccountBtn"),()=>{const {displayName,email,password}=cloudCredentials({forSignUp:true});return signUp(displayName,email,password)});
+let cloudAuthMode="sign-in";
+function setCloudAuthMode(mode){
+  cloudAuthMode=mode;
+  const creating=mode==="sign-up";
+  $("cloudDisplayNameField").classList.toggle("hidden",!creating);
+  $("cloudDisplayName").required=creating;
+  $("cloudPassword").autocomplete=creating?"new-password":"current-password";
+  $("cloudAuthMode").textContent=creating?"Create a new account.":"Sign in to your account.";
+  $("cloudSignInBtn").textContent=creating?"Back to sign in":"Sign in";
+  $("cloudSignInBtn").classList.toggle("secondary",creating);
+  $("cloudCreateAccountBtn").classList.toggle("secondary",!creating);
+}
+setCloudAuthMode("sign-in");
+$("cloudSignInBtn").onclick=()=>cloudAuthMode==="sign-up"?setCloudAuthMode("sign-in"):runCloudAction($("cloudSignInBtn"),()=>{const {email,password}=cloudCredentials();return signIn(email,password)});
+$("cloudCreateAccountBtn").onclick=()=>cloudAuthMode==="sign-in"?setCloudAuthMode("sign-up"):runCloudAction($("cloudCreateAccountBtn"),()=>{const {displayName,email,password}=cloudCredentials({forSignUp:true});return signUp(displayName,email,password)});
 $("cloudInitializeBtn").onclick=()=>runCloudAction($("cloudInitializeBtn"),initializeCloud);
 $("cloudSyncNowBtn").onclick=()=>runCloudAction($("cloudSyncNowBtn"),syncNow);
 $("cloudSignOutBtn").onclick=()=>runCloudAction($("cloudSignOutBtn"),signOut);

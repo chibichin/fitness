@@ -85,7 +85,8 @@
       <h3>Cloud Sync</h3>
       <p id="cloudSyncStatus" class="sync-status muted" aria-live="polite">Checking sync…</p>
       <div id="cloudAuthFields" class="cloud-auth-fields">
-        <label><span>Display name</span><input id="cloudDisplayName" type="text" autocomplete="name" required></label>
+        <p id="cloudAuthMode" class="muted">Sign in to your account.</p>
+        <label id="cloudDisplayNameField" class="hidden"><span>Display name</span><input id="cloudDisplayName" type="text" autocomplete="name"></label>
         <label><span>Email</span><input id="cloudEmail" type="email" autocomplete="username"></label>
         <label><span>Password</span><input id="cloudPassword" type="password" autocomplete="current-password"></label>
         <div class="cloud-auth-actions">
