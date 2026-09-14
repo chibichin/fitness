@@ -98,11 +98,16 @@ async function runSync({initialize=false}={}){
   finally{busy=false;if(queued){queued=false;scheduleSync(300)}}
 }
 function scheduleSync(delay=700){clearTimeout(saveTimer);saveTimer=setTimeout(()=>runSync(),delay)}
-function displayName(){return String(session?.user?.user_metadata?.display_name||session?.user?.raw_user_meta_data?.display_name||"").trim()}
+function displayName(){
+  const metadata={...(session?.user?.raw_user_meta_data||{}),...(session?.user?.user_metadata||{})};
+  return String(metadata.display_name||metadata.displayName||metadata.name||metadata.full_name||metadata.fullName||"").trim();
+}
 export function cloudSyncInfo(){return {configured,signedIn:Boolean(session),email:session?.user?.email||"",displayName:displayName()}}
 export async function signUp(displayName,email,password){
+  const name=String(displayName||"").trim();
+  if(!name)throw new Error("Enter a display name.");
   const redirectTo=new URL("./",window.location.href).href;
-  const result=await rawRequest(`/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTo)}`,{method:"POST",token:"",body:{email,password,data:{display_name:displayName}}});
+  const result=await rawRequest(`/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTo)}`,{method:"POST",token:"",body:{email,password,data:{display_name:name}}});
   if(result.access_token){rememberSession(result);await runSync()}
   else status("signed-out","Check your email to confirm the account, then sign in.");
 }

@@ -893,13 +893,15 @@ $("teacherExportForm").onsubmit=event=>{
     console.error(error);$("teacherExportStatus").textContent="Spreadsheet export failed. Please try again.";
   }
 };
-function cloudCredentials(){
-  const displayName=$("cloudDisplayName").value.trim(),email=$("cloudEmail").value.trim(),password=$("cloudPassword").value;
+function cloudCredentials({forSignUp=false}={}){
+  const displayName=$("cloudDisplayName").value.trim();
+  const email=$("cloudEmail").value.trim(),password=$("cloudPassword").value;
   if(!email||!password)throw new Error("Enter your email and password.");
+  if(forSignUp&&!displayName)throw new Error("Enter a display name.");
   return {displayName,email,password};
 }
 $("cloudSignInBtn").onclick=()=>runCloudAction($("cloudSignInBtn"),()=>{const {email,password}=cloudCredentials();return signIn(email,password)});
-$("cloudCreateAccountBtn").onclick=()=>runCloudAction($("cloudCreateAccountBtn"),()=>{const {displayName,email,password}=cloudCredentials();if(!displayName)throw new Error("Enter a display name for the new account.");return signUp(displayName,email,password)});
+$("cloudCreateAccountBtn").onclick=()=>runCloudAction($("cloudCreateAccountBtn"),()=>{const {displayName,email,password}=cloudCredentials({forSignUp:true});return signUp(displayName,email,password)});
 $("cloudInitializeBtn").onclick=()=>runCloudAction($("cloudInitializeBtn"),initializeCloud);
 $("cloudSyncNowBtn").onclick=()=>runCloudAction($("cloudSyncNowBtn"),syncNow);
 $("cloudSignOutBtn").onclick=()=>runCloudAction($("cloudSignOutBtn"),signOut);
