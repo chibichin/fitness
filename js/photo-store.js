@@ -28,7 +28,11 @@ function finishTransaction(transaction){
   });
 }
 
-export async function putPhoto(id,blob){
+function notifyPhotoChange(type,id=""){
+  if(typeof globalThis.dispatchEvent==="function"&&typeof globalThis.CustomEvent==="function")globalThis.dispatchEvent(new CustomEvent("fitness-photo-changed",{detail:{type,id}}));
+}
+
+export async function putPhoto(id,blob,{silent=false,cloudVersion=""}={}){
   if(!id||!(blob instanceof Blob))throw new Error("The photo could not be saved.");
   const database=await openDatabase();
   const transaction=database.transaction(STORE_NAME,"readwrite");
@@ -37,9 +41,11 @@ export async function putPhoto(id,blob){
     blob,
     size:blob.size,
     type:blob.type||"image/jpeg",
-    updatedAt:new Date().toISOString()
+    updatedAt:new Date().toISOString(),
+    cloudVersion:String(cloudVersion||"")
   });
   await finishTransaction(transaction);
+  if(!silent)notifyPhotoChange("put",String(id));
 }
 
 export async function getPhoto(id){
@@ -74,22 +80,24 @@ export async function getAllPhotos(){
   });
 }
 
-export async function deletePhoto(id){
+export async function deletePhoto(id,{silent=false}={}){
   if(!id)return;
   const database=await openDatabase();
   const transaction=database.transaction(STORE_NAME,"readwrite");
   transaction.objectStore(STORE_NAME).delete(String(id));
   await finishTransaction(transaction);
+  if(!silent)notifyPhotoChange("delete",String(id));
 }
 
-export async function clearPhotos(){
+export async function clearPhotos({silent=false}={}){
   const database=await openDatabase();
   const transaction=database.transaction(STORE_NAME,"readwrite");
   transaction.objectStore(STORE_NAME).clear();
   await finishTransaction(transaction);
+  if(!silent)notifyPhotoChange("clear");
 }
 
-export async function replaceAllPhotos(entries){
+export async function replaceAllPhotos(entries,{silent=false}={}){
   const database=await openDatabase();
   const transaction=database.transaction(STORE_NAME,"readwrite");
   const store=transaction.objectStore(STORE_NAME);
@@ -101,10 +109,12 @@ export async function replaceAllPhotos(entries){
       blob:entry.blob,
       size:entry.blob.size,
       type:entry.blob.type||"image/jpeg",
-      updatedAt:new Date().toISOString()
+      updatedAt:new Date().toISOString(),
+      cloudVersion:String(entry.cloudVersion||"")
     });
   }
   await finishTransaction(transaction);
+  if(!silent)notifyPhotoChange("replace");
 }
 
 export async function photoStorageStats(){

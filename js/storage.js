@@ -1,4 +1,8 @@
+import {createSyncMeta,recordStateChanges} from "./sync-core.js?v=1.5.0";
+
 export const KEY="fitness-record-v1";
+export const SYNC_META_KEY="fitness-record-sync-meta-v1";
+export const DEVICE_ID_KEY="fitness-record-device-id-v1";
 export function uid(){
   if(globalThis.crypto?.randomUUID)return globalThis.crypto.randomUUID();
   const bytes=new Uint8Array(16);
@@ -17,16 +21,30 @@ export function makeDefaultState(){
     {id:uid(),name:"Bike",category:"cardio",primaryMuscles:["Quads"],secondaryMuscles:["Glutes","Calves"],equipment:"Cardio machine",movementType:"Cardio",muscle:"Quads",photo:"",link:"",notes:"",archived:false},
     {id:uid(),name:"Hamstring Stretch",category:"flexibility",primaryMuscles:["Hamstrings"],secondaryMuscles:["Calves"],equipment:"Bodyweight",movementType:"Mobility",muscle:"Hamstrings",photo:"",link:"",notes:"",archived:false}
   ];
-  return {version:"1.4.16",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+  return {version:"1.5.0",exercises,plans:[],workouts:{},metrics:{},settings:{}};
+}
+export function getDeviceId(){
+  let id=localStorage.getItem(DEVICE_ID_KEY);
+  if(!id){id=uid();localStorage.setItem(DEVICE_ID_KEY,id)}
+  return id;
+}
+export function getSyncMeta(s){
+  try{
+    const saved=JSON.parse(localStorage.getItem(SYNC_META_KEY));
+    if(saved?.deviceId)return saved;
+  }catch{}
+  const created=createSyncMeta(s,getDeviceId());
+  localStorage.setItem(SYNC_META_KEY,JSON.stringify(created));
+  return created;
 }
 export function loadState(){
   try{
     const s=JSON.parse(localStorage.getItem(KEY));
     if(!s)return makeDefaultState();
-    s.version="1.4.16";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
+    s.version="1.5.0";s.exercises ||= [];s.plans ||= [];s.workouts ||= {};s.metrics ||= {};s.settings ||= {};
     const splitMuscles=value=>Array.isArray(value)?value.filter(Boolean):String(value||"").split(/[,;/]+/).map(x=>x.trim()).filter(Boolean);
     s.exercises.forEach(x=>{
-      x.archived ??= false;x.photo ||= "";x.photoId ||= "";x.link ||= "";x.notes ||= "";
+      x.archived ??= false;x.photo ||= "";x.photoId ||= "";x.photoVersion ||= x.photoId?"legacy":"";x.link ||= "";x.notes ||= "";
       x.name=String(x.name||"").trim();delete x.baseName;delete x.variationName;delete x.familyId;
       x.primaryMuscles=splitMuscles(x.primaryMuscles?.length?x.primaryMuscles:x.muscle);
       x.secondaryMuscles=splitMuscles(x.secondaryMuscles);
@@ -34,10 +52,10 @@ export function loadState(){
       x.secondaryMuscles=x.secondaryMuscles.filter(v=>!primaryKeys.has(v.toLowerCase()));
       x.equipment ||= "";x.movementType ||= "";x.muscle=x.primaryMuscles.join(", ");
     });
-    s.plans = s.plans.map(p=>({
+    s.plans = s.plans.map(({warmupAdditions,...p})=>({
       ...p,
       intendedFocus:splitMuscles(p.intendedFocus),
-      items:[...(p.warmupAdditions||[]),...(p.items||[])].map(i=>({...i,exerciseName:i.exerciseName||s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise"}))
+      items:[...(warmupAdditions||[]),...(p.items||[])].map(i=>({...i,exerciseName:i.exerciseName||s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise"}))
     }));
     Object.values(s.workouts).forEach(w=>{
       w.planIds ||= [];w.items ||= [];
@@ -76,25 +94,26 @@ export function isStorageFullError(error){
   return error?.name==="QuotaExceededError"||error?.name==="NS_ERROR_DOM_QUOTA_REACHED"||error?.code===22||error?.code===1014;
 }
 export function saveState(s){
-  try{localStorage.setItem(KEY,JSON.stringify(s))}
+  try{
+    let previous=null;
+    try{previous=JSON.parse(localStorage.getItem(KEY))}catch{}
+    const meta=previous?recordStateChanges(previous,s,getSyncMeta(previous),getDeviceId()):createSyncMeta(s,getDeviceId());
+    s.version="1.5.0";
+    localStorage.setItem(KEY,JSON.stringify(s));
+    localStorage.setItem(SYNC_META_KEY,JSON.stringify(meta));
+    if(typeof globalThis.dispatchEvent==="function"&&typeof globalThis.CustomEvent==="function")globalThis.dispatchEvent(new CustomEvent("fitness-state-saved"));
+  }
   catch(error){
     if(isStorageFullError(error)){
-      const storageError=new Error("App data storage is full. Export a backup before making more changes.");
+      const storageError=new Error("App data storage is full. Check cloud sync before making more changes.");
       storageError.name="StorageFullError";
       throw storageError;
     }
     throw error;
   }
 }
-export function downloadBackup(s,suffix="data"){
-  const backup=structuredClone(s);
-  backup.version="1.4.16";
-  for(const exercise of backup.exercises||[]){
-    exercise.photo="";
-    exercise.photoId="";
-  }
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(new Blob([JSON.stringify(backup,null,2)],{type:"application/json"}));
-  a.download=`fitness-${suffix}-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+export function saveRemoteState(s,meta){
+  s.version="1.5.0";
+  localStorage.setItem(KEY,JSON.stringify(s));
+  localStorage.setItem(SYNC_META_KEY,JSON.stringify(meta));
 }

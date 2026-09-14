@@ -1,8 +1,9 @@
-import {loadState,saveState,makeDefaultState,downloadBackup,uid} from "./storage.js?v=1.4.16";
-import {downloadTeacherWorkbook} from "./xlsx.js?v=1.4.16";
-import {compressPhotoFile,compressPhotoDataUrl,formatBytes} from "./photo.js?v=1.4.16";
-import {putPhoto,getAllPhotos,deletePhoto,clearPhotos,replaceAllPhotos,photoStorageStats,blobToDataUrl,requestPersistentPhotoStorage} from "./photo-store.js?v=1.4.16";
-import {enableReorder} from "./reorder.js?v=1.4.16";
+import {loadState,saveState,uid} from "./storage.js?v=1.5.0";
+import {downloadTeacherWorkbook} from "./xlsx.js?v=1.5.0";
+import {compressPhotoFile,compressPhotoDataUrl,formatBytes} from "./photo.js?v=1.5.0";
+import {putPhoto,getAllPhotos,deletePhoto,photoStorageStats,requestPersistentPhotoStorage} from "./photo-store.js?v=1.5.0";
+import {enableReorder} from "./reorder.js?v=1.5.0";
+import {initializeCloudSync,cloudSyncInfo,signUp,signIn,signOut,initializeCloud,syncNow} from "./cloud-sync.js?v=1.5.0";
 
 let state=loadState();
 let selectedDate=todayKey();
@@ -20,6 +21,7 @@ const exercisePhotoUrls=new Map();
 let addWorkoutPlanId="";
 let addWorkoutPlanSelection=new Set();
 let addWorkoutExerciseSelection=new Set();
+let latestCloudStatus={kind:"setup",message:"Checking sync…",signedIn:false,configured:false};
 
 const $=id=>document.getElementById(id);
 const sections=["warmup","strength","cardio","flexibility"];
@@ -49,9 +51,9 @@ function activeExercises(category){return state.exercises.filter(x=>!x.archived&
 function itemCategory(item){return item.category||exById(item.exerciseId)?.category||"strength"}
 function isDone(item){return item.type==="cardio"?(item.intervals?.length>0&&item.intervals.every(x=>x.done)):(item.sets?.length>0&&item.sets.every(x=>x.done))}
 function storageErrorMessage(error){
-  if(error?.name==="StorageFullError")return "App data storage is full. Export a backup before making more changes.";
-  if(error?.name==="QuotaExceededError")return "Photo storage is full on this device. Export a full backup before removing photos.";
-  return "This change could not be saved. Please export a backup and try again.";
+  if(error?.name==="StorageFullError")return "App data storage is full. Check cloud sync before making more changes.";
+  if(error?.name==="QuotaExceededError")return "Photo storage is full on this device. Check cloud sync before removing photos.";
+  return "This change could not be saved. Check cloud sync and try again.";
 }
 function persist(){
   try{saveState(state);renderAll();return true}
@@ -600,57 +602,6 @@ async function renderStorageUsage(){
   }
 }
 
-function downloadJsonFile(value,filename){
-  const link=document.createElement("a");
-  link.href=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:"application/json"}));
-  link.download=filename;
-  link.click();
-  setTimeout(()=>URL.revokeObjectURL(link.href),1000);
-}
-
-async function downloadFullBackup(){
-  const button=$("exportFullBackupBtn");
-  button.disabled=true;button.textContent="Preparing photos…";
-  try{
-    const backup=structuredClone(state),photos=new Map((await getAllPhotos()).map(record=>[record.id,record]));
-    backup.version="1.4.16";
-    backup.backupType="full";
-    for(const exercise of backup.exercises||[]){
-      const record=exercise.photoId?photos.get(exercise.photoId):null;
-      exercise.photo=record?.blob?await blobToDataUrl(record.blob):String(exercise.photo||"");
-    }
-    downloadJsonFile(backup,`fitness-full-backup-${new Date().toISOString().slice(0,10)}.json`);
-  }catch(error){
-    console.error(error);
-    alert("The full backup could not be prepared. Please try again.");
-  }finally{
-    button.disabled=false;button.textContent="Export full backup (with photos)";
-  }
-}
-
-async function prepareRestoredBackup(restored){
-  const prepared=structuredClone(restored),photoEntries=[];
-  let originalBytes=0,storedBytes=0;
-  prepared.version="1.4.16";
-  delete prepared.backupType;
-  for(const exercise of prepared.exercises||[]){
-    const legacyPhoto=String(exercise.photo||"");
-    exercise.photo="";
-    exercise.photoId="";
-    if(!legacyPhoto.startsWith("data:image/"))continue;
-    const result=await compressPhotoDataUrl(legacyPhoto);
-    photoEntries.push({id:exercise.id,blob:result.blob});
-    exercise.photoId=exercise.id;
-    originalBytes+=result.originalBytes;
-    storedBytes+=result.compressedBytes;
-  }
-  await replaceAllPhotos(photoEntries);
-  saveState(prepared);
-  state=loadState();
-  await refreshExercisePhotoUrls();
-  return {count:photoEntries.length,originalBytes,storedBytes};
-}
-
 async function migrateLegacyPhotos(){
   let migrated=0,originalBytes=0,storedBytes=0;
   for(const exercise of state.exercises||[]){
@@ -659,6 +610,7 @@ async function migrateLegacyPhotos(){
     const result=await compressPhotoDataUrl(legacyPhoto);
     await putPhoto(exercise.id,result.blob);
     exercise.photoId=exercise.id;
+    exercise.photoVersion=String(Date.now());
     exercise.photo="";
     saveState(state);
     migrated++;
@@ -669,6 +621,21 @@ async function migrateLegacyPhotos(){
 }
 
 function renderAll(){renderHeader();renderWeek();renderWorkout();renderPlans();renderLibrary();renderProgress();renderStorageUsage()}
+
+function renderCloudSyncStatus(next=latestCloudStatus){
+  latestCloudStatus=next;
+  const info=cloudSyncInfo(),statusHost=$("cloudSyncStatus");
+  statusHost.textContent=next.message;statusHost.dataset.kind=next.kind;
+  $("cloudAuthFields").classList.toggle("hidden",!next.configured||next.signedIn);
+  $("cloudSignedInActions").classList.toggle("hidden",!next.signedIn);
+  $("cloudAccount").textContent=info.email?`Signed in as ${info.email}`:"";
+  $("cloudInitializeBtn").classList.toggle("hidden",next.kind!=="needs-initialization");
+}
+async function runCloudAction(button,action){
+  const original=button.textContent;button.disabled=true;button.textContent="Please wait…";
+  try{await action()}catch(error){console.error(error);renderCloudSyncStatus({...latestCloudStatus,kind:"error",message:error.message||"Cloud action failed."})}
+  finally{button.disabled=false;button.textContent=original}
+}
 
 function clearExercisePhotoObjectUrl(){if(exercisePhotoObjectUrl){URL.revokeObjectURL(exercisePhotoObjectUrl);exercisePhotoObjectUrl=""}}
 function showExercisePhotoPreview(src=""){$("exercisePhotoPreview").src=src;$("exercisePhotoPreviewWrap").classList.toggle("hidden",!src)}
@@ -837,15 +804,16 @@ $("exerciseForm").onsubmit=async e=>{
   const old=id?exById(id):null;
   const recordId=id||uid();
   let photoId=old?.photoId||"";
+  let photoVersion=old?.photoVersion||"";
   try{
     if(removeExercisePhotoRequested){
       if(photoId)await deletePhoto(photoId);
       if(photoId)setExercisePhotoUrl(photoId,null);
-      photoId="";
+      photoId="";photoVersion="";
     }else if(pendingExercisePhotoBlob){
       await putPhoto(recordId,pendingExercisePhotoBlob);
       setExercisePhotoUrl(recordId,pendingExercisePhotoBlob);
-      photoId=recordId;
+      photoId=recordId;photoVersion=String(Date.now());
     }
   }catch(error){
     console.error(error);
@@ -854,7 +822,7 @@ $("exerciseForm").onsubmit=async e=>{
   }
   const legacyPhoto=!photoId&&!removeExercisePhotoRequested&&!pendingExercisePhotoBlob?String(old?.photo||""):"";
   const primaryMuscles=readChoiceValues("exercisePrimaryMuscles","exercisePrimaryCustom"),primaryKeys=new Set(primaryMuscles.map(x=>x.toLowerCase())),secondaryMuscles=readChoiceValues("exerciseSecondaryMuscles","exerciseSecondaryCustom").filter(x=>!primaryKeys.has(x.toLowerCase()));
-  const record={id:recordId,name,category:$("exerciseCategory").value,primaryMuscles,secondaryMuscles,equipment:$("exerciseEquipment").value,movementType:$("exerciseMovementType").value,muscle:primaryMuscles.join(", "),photo:legacyPhoto,photoId,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};
+  const record={id:recordId,name,category:$("exerciseCategory").value,primaryMuscles,secondaryMuscles,equipment:$("exerciseEquipment").value,movementType:$("exerciseMovementType").value,muscle:primaryMuscles.join(", "),photo:legacyPhoto,photoId,photoVersion,link:$("exerciseLink").value.trim(),notes:$("exerciseNotes").value.trim(),archived:false};
   const index=id?state.exercises.findIndex(x=>x.id===id):-1;
   if(index>=0)state.exercises[index]=record;else state.exercises.push(record);
   if(!persist()){
@@ -889,39 +857,17 @@ $("teacherExportForm").onsubmit=event=>{
     console.error(error);$("teacherExportStatus").textContent="Spreadsheet export failed. Please try again.";
   }
 };
-$("exportFullBackupBtn").onclick=downloadFullBackup;
-$("exportDataBackupBtn").onclick=()=>downloadBackup(state);
-$("restoreBackupInput").onchange=async e=>{
-  const input=e.target,f=input.files[0];if(!f)return;
-  let restored;
-  try{
-    restored=JSON.parse(await f.text());
-    if(!restored||typeof restored!=="object"||!Array.isArray(restored.exercises))throw new Error("Invalid structure");
-  }catch{
-    input.value="";alert("Invalid backup file. The JSON file could not be read.");return;
-  }
-  try{
-    const result=await prepareRestoredBackup(restored);
-    renderAll();input.value="";
-    const note=result.count?` ${result.count} photo${result.count===1?" was":"s were"} restored to separate photo storage (${formatBytes(result.storedBytes)}).`:" This backup did not contain photos.";
-    alert(`Backup restored.${note}`);
-  }catch(error){
-    console.error(error);input.value="";
-    alert(error?.name==="StorageFullError"||error?.name==="QuotaExceededError"?storageErrorMessage(error):(error?.message||"A photo in this backup could not be prepared."));
-  }
-};
-$("clearDataBtn").onclick=async()=>{
-  if(!confirm("Clear all local data and saved photos from this device?"))return;
-  try{
-    await clearPhotos();
-    for(const url of exercisePhotoUrls.values())URL.revokeObjectURL(url);
-    exercisePhotoUrls.clear();
-    state=makeDefaultState();saveState(state);selectedDate=todayKey();weekOffset=0;renderAll();
-  }catch(error){
-    console.error(error);alert("Local data could not be cleared. Please try again.");
-  }
-};
-if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js?v=1.4.16",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
+function cloudCredentials(){
+  const email=$("cloudEmail").value.trim(),password=$("cloudPassword").value;
+  if(!email||!password)throw new Error("Enter your email and password.");
+  return {email,password};
+}
+$("cloudSignInBtn").onclick=()=>runCloudAction($("cloudSignInBtn"),()=>signIn(...Object.values(cloudCredentials())));
+$("cloudCreateAccountBtn").onclick=()=>runCloudAction($("cloudCreateAccountBtn"),()=>signUp(...Object.values(cloudCredentials())));
+$("cloudInitializeBtn").onclick=()=>runCloudAction($("cloudInitializeBtn"),initializeCloud);
+$("cloudSyncNowBtn").onclick=()=>runCloudAction($("cloudSyncNowBtn"),syncNow);
+$("cloudSignOutBtn").onclick=()=>runCloudAction($("cloudSignOutBtn"),signOut);
+if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js?v=1.5.0",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
 async function initializeApp(){
   try{
     requestPersistentPhotoStorage();
@@ -936,5 +882,10 @@ async function initializeApp(){
     setTimeout(()=>alert(error?.message||"Existing photos could not be moved to separate storage. They remain in the current app data."),0);
   }
   renderAll();
+  initializeCloudSync({
+    getState:()=>state,
+    applyState:async next=>{state=next;await refreshExercisePhotoUrls();renderAll()},
+    onStatus:renderCloudSyncStatus
+  });
 }
 initializeApp();
