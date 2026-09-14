@@ -6,7 +6,7 @@ import {getAllPhotos,getPhoto,putPhoto} from "./photo-store.js?v=1.5.0";
 const SESSION_KEY="fitness-record-cloud-session-v1";
 const OWNER_KEY="fitness-record-cloud-owner-v1";
 const configured=Boolean(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY);
-let session=null,busy=false,queued=false,pollTimer=null,saveTimer=null;
+let session=null,busy=false,queued=false,saveTimer=null;
 let callbacks={getState:()=>null,applyState:()=>{},onStatus:()=>{}};
 
 function status(kind,message){callbacks.onStatus({kind,message,signedIn:Boolean(session),configured})}
@@ -96,8 +96,6 @@ async function runSync({initialize=false}={}){
   finally{busy=false;if(queued){queued=false;scheduleSync(300)}}
 }
 function scheduleSync(delay=700){clearTimeout(saveTimer);saveTimer=setTimeout(()=>runSync(),delay)}
-function startPolling(){clearInterval(pollTimer);pollTimer=setInterval(()=>{if(document.visibilityState==="visible")runSync()},15000)}
-
 export function cloudSyncInfo(){return {configured,signedIn:Boolean(session),email:session?.user?.email||""}}
 export async function signUp(email,password){
   const redirectTo=new URL("./",window.location.href).href;
@@ -107,11 +105,11 @@ export async function signUp(email,password){
 }
 export async function signIn(email,password){
   rememberSession(await rawRequest("/auth/v1/token?grant_type=password",{method:"POST",token:"",body:{email,password}}));
-  startPolling();await runSync();
+  await runSync();
 }
 export async function signOut(){
   try{if(session)await rawRequest("/auth/v1/logout",{method:"POST"})}catch{}
-  rememberSession(null);clearInterval(pollTimer);status("signed-out","Signed out. Sign in to view your workout data.");
+  rememberSession(null);status("signed-out","Signed out. Sign in to view your workout data.");
 }
 export function initializeCloud(){return runSync({initialize:true})}
 export function syncNow(){return runSync()}
@@ -123,5 +121,5 @@ export function initializeCloudSync(nextCallbacks){
   globalThis.addEventListener("fitness-photo-changed",()=>scheduleSync());
   document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")runSync()});
   globalThis.addEventListener("online",()=>runSync());
-  if(session){startPolling();runSync()}else status("signed-out","Sign in on this device to sync.");
+  if(session)runSync();else status("signed-out","Sign in on this device to sync.");
 }
