@@ -25,8 +25,20 @@ async function rawRequest(path,{method="GET",body,token=session?.access_token,he
 async function ensureSession(){
   if(!session)throw new Error("Sign in to sync.");
   if((session.expires_at||0)>Math.floor(Date.now()/1000)+60)return session;
-  const refreshed=await rawRequest("/auth/v1/token?grant_type=refresh_token",{method:"POST",token:"",body:{refresh_token:session.refresh_token}});
-  rememberSession(refreshed);return session;
+  if(!session.refresh_token){
+    rememberSession(null);
+    const error=new Error("Session expired. Sign in again to sync.");error.authExpired=true;throw error;
+  }
+  try{
+    const refreshed=await rawRequest("/auth/v1/token?grant_type=refresh_token",{method:"POST",token:"",body:{refresh_token:session.refresh_token}});
+    rememberSession(refreshed);return session;
+  }catch(error){
+    if(/invalid refresh token|refresh token not found/i.test(error.message||"")){
+      rememberSession(null);
+      const authError=new Error("Session expired. Sign in again to sync.");authError.authExpired=true;throw authError;
+    }
+    throw error;
+  }
 }
 async function request(path,options={}){await ensureSession();return rawRequest(path,options)}
 async function cloudRow(){
@@ -94,7 +106,7 @@ async function runSync({initialize=false}={}){
       status("synced",`Synced ${new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}`);return;
     }
     throw new Error("Another device kept changing the data. Sync will retry shortly.");
-  }catch(error){console.error(error);status("error",error.message||"Sync failed. Local changes are saved and will retry.")}
+  }catch(error){console.error(error);status(error.authExpired?"signed-out":"error",error.message||"Sync failed. Local changes are saved and will retry.")}
   finally{busy=false;if(queued){queued=false;scheduleSync(300)}}
 }
 function scheduleSync(delay=700){clearTimeout(saveTimer);saveTimer=setTimeout(()=>runSync(),delay)}
