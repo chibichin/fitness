@@ -6,7 +6,7 @@ import {getAllPhotos,getPhoto,putPhoto} from "./photo-store.js?v=1.5.0";
 const SESSION_KEY="fitness-record-cloud-session-v1";
 const OWNER_KEY="fitness-record-cloud-owner-v1";
 const configured=Boolean(SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY);
-let session=null,busy=false,queued=false,saveTimer=null;
+let session=null,busy=false,queued=false,saveTimer=null,localChangeSeq=0;
 let callbacks={getState:()=>null,switchAccount:async()=>{},applyState:()=>{},onStatus:()=>{}};
 
 function status(kind,message){callbacks.onStatus({kind,message,signedIn:Boolean(session),configured})}
@@ -70,11 +70,17 @@ async function downloadPhotos(state){
     }catch(error){console.error("Photo download failed",exercise.photoId,error)}
   }
 }
+async function applySyncedState(nextState,nextMeta,syncSeq){
+  await downloadPhotos(nextState);
+  if(localChangeSeq!==syncSeq){queued=true;return false}
+  saveRemoteState(nextState,nextMeta);callbacks.applyState(nextState);localStorage.setItem(OWNER_KEY,session.user.id);
+  status("synced",`Synced ${new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}`);return true;
+}
 async function runSync({initialize=false}={}){
   if(!configured){status("setup","Cloud setup is required before sync can start.");return}
   if(!session){status("signed-out","Sign in on this device to sync.");return}
   if(busy){queued=true;return}
-  busy=true;status("working","Syncing…");
+  busy=true;const syncSeq=localChangeSeq;status("working","Syncing…");
   try{
     const owner=localStorage.getItem(OWNER_KEY);
     if(owner&&owner!==session.user.id)await callbacks.switchAccount(session.user.id);
@@ -85,31 +91,28 @@ async function runSync({initialize=false}={}){
       remote=await writeCloud(0,local,localMeta);
     }
     if(remote&&localStorage.getItem(OWNER_KEY)!==session.user.id){
-      saveRemoteState(remote.state,remote.metadata);await downloadPhotos(remote.state);callbacks.applyState(remote.state);
-      localStorage.setItem(OWNER_KEY,session.user.id);
-      status("synced",`Synced ${new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}`);return;
+      if(await applySyncedState(remote.state,remote.metadata,syncSeq))return;
+      return;
     }
     for(let attempt=0;attempt<3;attempt++){
       const merged=mergeStates(local,localMeta,remote.state,remote.metadata);
       if(same(merged.state,remote.state)&&same(merged.meta,remote.metadata)){
-        saveRemoteState(merged.state,merged.meta);await downloadPhotos(merged.state);callbacks.applyState(merged.state);
-        localStorage.setItem(OWNER_KEY,session.user.id);
-        status("synced",`Synced ${new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}`);return;
+        if(await applySyncedState(merged.state,merged.meta,syncSeq))return;
+        return;
       }
       await uploadPhotos(merged.state);
       const written=await writeCloud(Number(remote.revision)||0,merged.state,merged.meta);
       if(!written.applied){
         remote=written;local=merged.state;localMeta=merged.meta;continue;
       }
-      saveRemoteState(written.state,written.metadata);await downloadPhotos(written.state);callbacks.applyState(written.state);
-      localStorage.setItem(OWNER_KEY,session.user.id);
-      status("synced",`Synced ${new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}`);return;
+      if(await applySyncedState(written.state,written.metadata,syncSeq))return;
+      return;
     }
     throw new Error("Another device kept changing the data. Sync will retry shortly.");
   }catch(error){console.error(error);status(error.authExpired?"signed-out":"error",error.message||"Sync failed. Local changes are saved and will retry.")}
-  finally{busy=false;if(queued){queued=false;scheduleSync(300)}}
+  finally{busy=false;if(queued){queued=false;scheduleSync(15000)}}
 }
-function scheduleSync(delay=700){clearTimeout(saveTimer);saveTimer=setTimeout(()=>runSync(),delay)}
+function scheduleSync(delay=15000){clearTimeout(saveTimer);saveTimer=setTimeout(()=>runSync(),delay)}
 function displayName(){
   const metadata={...(session?.user?.raw_user_meta_data||{}),...(session?.user?.user_metadata||{})};
   return String(metadata.display_name||metadata.displayName||metadata.name||metadata.full_name||metadata.fullName||"").trim();
@@ -137,8 +140,8 @@ export function initializeCloudSync(nextCallbacks){
   callbacks={...callbacks,...nextCallbacks};
   if(!configured){status("setup","Cloud setup is required before sync can start.");return}
   try{rememberSession(JSON.parse(localStorage.getItem(SESSION_KEY)))}catch{rememberSession(null)}
-  globalThis.addEventListener("fitness-state-saved",()=>scheduleSync());
-  globalThis.addEventListener("fitness-photo-changed",()=>scheduleSync());
+  globalThis.addEventListener("fitness-state-saved",()=>{localChangeSeq++;scheduleSync()});
+  globalThis.addEventListener("fitness-photo-changed",()=>{localChangeSeq++;scheduleSync()});
   document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")runSync()});
   globalThis.addEventListener("online",()=>runSync());
   if(session)runSync();else status("signed-out","Sign in on this device to sync.");
