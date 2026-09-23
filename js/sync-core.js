@@ -19,7 +19,7 @@ export function createSyncMeta(state,deviceId,now=Date.now()){
   for(const name of MAPS)for(const key of Object.keys(state[name]||{}))meta[name][key]={stamp:nextStamp(meta,now),deleted:false};
   for(const [date,workout] of Object.entries(state.workouts||{})){
     const stamp=nextStamp(meta,now),items={};
-    for(const item of workout.items||[])items[item.id]={stamp,deleted:false};
+    for(const [order,item] of (workout.items||[]).entries())items[item.id]={stamp,deleted:false,order};
     meta.workouts[date]={stamp,fieldsStamp:stamp,deleted:false,items};
   }
   meta.settings={stamp:nextStamp(meta,now),deleted:false};
@@ -50,7 +50,7 @@ export function recordStateChanges(previous,next,currentMeta,deviceId,now=Date.n
     if(!after){const stamp=nextStamp(meta,now);meta.workouts[date]={...existing,stamp,deleted:true};continue}
     if(!before){
       const stamp=nextStamp(meta,now),items={};
-      for(const item of after.items||[])items[item.id]={stamp,deleted:false};
+      for(const [order,item] of (after.items||[]).entries())items[item.id]={stamp,deleted:false,order};
       meta.workouts[date]={stamp,fieldsStamp:stamp,deleted:false,items};continue;
     }
     let changed=false;
@@ -58,9 +58,14 @@ export function recordStateChanges(previous,next,currentMeta,deviceId,now=Date.n
       existing.fieldsStamp=nextStamp(meta,now);changed=true;
     }
     const beforeItems=byId(before.items),afterItems=byId(after.items);
+    const beforeOrder=new Map((before.items||[]).map((item,index)=>[item.id,index]));
+    const afterOrder=new Map((after.items||[]).map((item,index)=>[item.id,index]));
     for(const id of new Set([...beforeItems.keys(),...afterItems.keys()])){
-      if(same(beforeItems.get(id),afterItems.get(id)))continue;
-      existing.items[id]={stamp:nextStamp(meta,now),deleted:!afterItems.has(id)};changed=true;
+      const contentChanged=!same(beforeItems.get(id),afterItems.get(id));
+      const orderChanged=afterItems.has(id)&&beforeItems.has(id)&&beforeOrder.get(id)!==afterOrder.get(id);
+      if(!contentChanged&&!orderChanged)continue;
+      const stamp=nextStamp(meta,now);
+      existing.items[id]={stamp,deleted:!afterItems.has(id),...(afterItems.has(id)?{order:afterOrder.get(id)}:{})};changed=true;
     }
     if(changed)existing.stamp=nextStamp(meta,now);
     existing.deleted=false;meta.workouts[date]=existing;
@@ -104,11 +109,14 @@ export function mergeStates(localState,localMeta,remoteState,remoteMeta){
     const fields=winner(localWorkout, {stamp:localEntry.fieldsStamp}, remoteWorkout, {stamp:remoteEntry.fieldsStamp}).value||{};
     const workout={...clone(fields),items:[]},entry={stamp:localEntry.stamp>remoteEntry.stamp?localEntry.stamp:remoteEntry.stamp,fieldsStamp:localEntry.fieldsStamp>remoteEntry.fieldsStamp?localEntry.fieldsStamp:remoteEntry.fieldsStamp,deleted:false,items:{}};
     const localItems=byId(localWorkout.items),remoteItems=byId(remoteWorkout.items);
+    const mergedItems=[];
     for(const id of new Set([...Object.keys(localEntry.items),...Object.keys(remoteEntry.items),...localItems.keys(),...remoteItems.keys()])){
       const picked=winner(localItems.get(id),localEntry.items[id],remoteItems.get(id),remoteEntry.items[id]);
       if(picked.entry)entry.items[id]=clone(picked.entry);
-      if(!picked.entry?.deleted&&picked.value)workout.items.push(clone(picked.value));
+      if(!picked.entry?.deleted&&picked.value)mergedItems.push({item:clone(picked.value),order:Number.isFinite(Number(picked.entry?.order))?Number(picked.entry.order):mergedItems.length,stamp:picked.entry?.stamp||""});
     }
+    mergedItems.sort((a,b)=>a.order-b.order||a.stamp.localeCompare(b.stamp)||String(a.item.id).localeCompare(String(b.item.id)));
+    workout.items=mergedItems.map(value=>value.item);
     state.workouts[date]=workout;meta.workouts[date]=entry;
   }
   const settings=winner(localState?.settings||{},localMeta?.settings,remoteState?.settings||{},remoteMeta?.settings);
@@ -118,6 +126,9 @@ export function mergeStates(localState,localMeta,remoteState,remoteMeta){
 
 function normalizeWorkoutMeta(entry={},workout={}){
   const normalized={stamp:entry?.stamp||"",fieldsStamp:entry?.fieldsStamp||entry?.stamp||"",deleted:Boolean(entry?.deleted),items:clone(entry?.items||{})};
-  for(const item of workout?.items||[])normalized.items[item.id]||={stamp:normalized.stamp,deleted:false};
+  for(const [order,item] of (workout?.items||[]).entries()){
+    normalized.items[item.id]||={stamp:normalized.stamp,deleted:false,order};
+    normalized.items[item.id].order??=order;
+  }
   return normalized;
 }
