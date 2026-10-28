@@ -1,14 +1,16 @@
-import {KEY,SYNC_META_KEY,loadState,makeDefaultState,saveState,uid} from "./storage.js?v=1.5.0";
-import {downloadTeacherWorkbook} from "./xlsx.js?v=1.5.0";
-import {compressPhotoFile,compressPhotoDataUrl,formatBytes} from "./photo.js?v=1.5.0";
-import {putPhoto,getAllPhotos,deletePhoto,photoStorageStats,requestPersistentPhotoStorage} from "./photo-store.js?v=1.5.0";
-import {enableReorder} from "./reorder.js?v=1.5.0";
-import {initializeCloudSync,cloudSyncInfo,signUp,signIn,signOut,initializeCloud,syncNow} from "./cloud-sync.js?v=1.5.0";
+import {KEY,SYNC_META_KEY,loadState,makeDefaultState,saveState,uid} from "./storage.js?v=1.6.0";
+import {downloadTeacherWorkbook} from "./xlsx.js?v=1.6.0";
+import {compressPhotoFile,compressPhotoDataUrl,formatBytes} from "./photo.js?v=1.6.0";
+import {putPhoto,getAllPhotos,deletePhoto,photoStorageStats,requestPersistentPhotoStorage} from "./photo-store.js?v=1.6.0";
+import {enableReorder} from "./reorder.js?v=1.6.0";
+import {initializeCloudSync,cloudSyncInfo,signUp,signIn,signOut,initializeCloud,syncNow} from "./cloud-sync.js?v=1.6.0";
+import {scheduledPlanForDate,scheduledPlanForDay} from "./schedule-core.js?v=1.6.0";
 
 let state=loadState();
 let selectedDate=todayKey();
 let weekOffset=0;
 let planDraft=null;
+let weeklyScheduleDraft=null;
 let intervalDraft=[10,10];
 let addToIntervalDraft=[10,10];
 let pendingWorkoutItemRemoval=null;
@@ -31,6 +33,8 @@ const ACCOUNT_META_PREFIX="fitness-record-account-meta-v1-";
 const $=id=>document.getElementById(id);
 const sections=["warmup","strength","cardio","flexibility"];
 const labels={warmup:"Warm up",strength:"Strength",cardio:"Cardio",flexibility:"Flexibility"};
+const weekdayNames=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const weekdayShortNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const muscleOptions=["Chest","Back","Shoulders","Biceps","Triceps","Forearms","Core","Quads","Hamstrings","Glutes","Calves","Hip flexors","Hips","Adductors","Abductors","Neck","Full body"];
 const equipmentLabels={"":"Not specified","Bodyweight":"Bodyweight","Dumbbell":"Dumbbell","Barbell":"Barbell","Machine":"Machine","Cable":"Cable","Kettlebell":"Kettlebell","Resistance band":"Resistance band","Cardio machine":"Cardio machine","Other":"Other"};
 
@@ -40,6 +44,11 @@ function keyFromDate(d){return localDateKey(d)}
 function prettyDate(key){return new Intl.DateTimeFormat("en-US",{weekday:"long",month:"long",day:"numeric"}).format(new Date(key+"T12:00:00"))}
 function exById(id){return state.exercises.find(x=>x.id===id)}
 function planById(id){return state.plans.find(x=>x.id===id)}
+function schedulePlanIdForDate(date){return scheduledPlanForDate(state.settings?.weeklySchedule,date)}
+function planIsInWeeklySchedule(planId){
+  const schedule=state.settings?.weeklySchedule;if(!schedule)return false;
+  return (schedule.days||[]).some(day=>scheduledPlanForDay(schedule,day)===planId)||Object.values(schedule.overrides||{}).includes(planId);
+}
 function exercisePhotoUrl(ex){return ex?.photoId?exercisePhotoUrls.get(ex.photoId)||"":ex?.photo||""}
 function setExercisePhotoUrl(id,blob){
   const previous=exercisePhotoUrls.get(id);
@@ -177,7 +186,7 @@ function renderWeek(){
   const host=$("weekStrip");host.innerHTML="";
   for(let i=0;i<7;i++){
     const d=new Date(start);d.setDate(start.getDate()+i);const key=keyFromDate(d),w=workoutFor(key);
-    const status=w?.items?.length?(w.items.every(isDone)?"✓":"P"):"";
+    const status=w?.items?.length?(w.items.every(isDone)?"✓":"P"):(schedulePlanIdForDate(key)?"Plan":"");
     const b=document.createElement("button");b.className="week-day"+(key===todayKey()?" today":"")+(key===selectedDate?" selected":"");
     b.innerHTML=`<small>${new Intl.DateTimeFormat("en-US",{weekday:"narrow"}).format(d)}</small><b>${d.getDate()}</b><em>${status}</em>`;
     b.onclick=()=>{selectedDate=key;renderAll()};host.appendChild(b);
@@ -222,8 +231,39 @@ function renderTodayMuscleFocus(w){
   const html=focusSummaryHtml({main:summary.main,also:summary.also});
   host.innerHTML=html;host.classList.toggle("hidden",!html);
 }
+function renderScheduledPlan(w){
+  const host=$("scheduledPlanHost"),planId=schedulePlanIdForDate(selectedDate),plan=planById(planId),dateIsToday=selectedDate===todayKey();
+  host.innerHTML="";
+  if(selectedDate<todayKey())return;
+  if(!state.settings?.weeklySchedule){host.innerHTML='<article class="scheduled-plan-card"><h4>Set a weekly routine</h4><p class="muted">Choose how many days you want to work out, pick those days, and assign your saved Plans.</p><button type="button" data-schedule-setup>Set up weekly routine</button></article>';host.querySelector("[data-schedule-setup]").onclick=openWeeklySchedule;return}
+  if(!plan)return;
+  const alreadyLoaded=Boolean(w?.items?.some(item=>item.sourcePlanId===plan.id));
+  const nextDay=new Date(`${todayKey()}T12:00:00`);nextDay.setDate(nextDay.getDate()+1);
+  const minMoveDate=localDateKey(nextDay);
+  host.innerHTML=`<article class="scheduled-plan-card"><h4>${dateIsToday?"Today's scheduled Plan":`Scheduled for ${escapeHtml(prettyDate(selectedDate))}`}</h4><strong>${escapeHtml(plan.name)}</strong>${plan.archived?'<span class="plan-card-badge">Archived</span>':''}<p class="muted">${alreadyLoaded?"This Plan is already in the workout.":dateIsToday?"Check how you feel, then choose what works for today.":"When this day arrives, check your energy before loading the Plan."}</p>${alreadyLoaded?"":dateIsToday?`<div class="scheduled-plan-actions"><button type="button" data-schedule-start>Start as planned</button><button type="button" class="secondary" data-schedule-light>Use a lighter version</button><button type="button" class="secondary" data-schedule-skip>Rest / skip today</button><button type="button" class="secondary" data-schedule-move-toggle>Move to another day</button></div><p class="muted routine-kind">A lighter start uses one fewer strength set when possible, about 15% less than your last recorded weight, and shorter cardio intervals. You can adjust any values after loading.</p><div class="schedule-move-row hidden" id="scheduleMoveRow"><label><span>Move this Plan to</span><input id="scheduleMoveDate" type="date" min="${minMoveDate}" value="${minMoveDate}" required></label><button type="button" data-schedule-move-confirm>Move Plan</button></div>`:""}</article>`;
+  host.querySelector("[data-schedule-start]")?.addEventListener("click",()=>loadScheduledPlan(plan,false));
+  host.querySelector("[data-schedule-light]")?.addEventListener("click",()=>loadScheduledPlan(plan,true));
+  host.querySelector("[data-schedule-skip]")?.addEventListener("click",()=>skipScheduledPlan(selectedDate));
+  host.querySelector("[data-schedule-move-toggle]")?.addEventListener("click",()=>$("scheduleMoveRow").classList.toggle("hidden"));
+  host.querySelector("[data-schedule-move-confirm]")?.addEventListener("click",()=>moveScheduledPlan(plan.id,selectedDate,$("scheduleMoveDate").value));
+}
+function loadScheduledPlan(plan,lighter){
+  const count=addPlanToWorkout(plan,null,{lighter});
+  if(!count){alert("This Plan's exercises are already in the workout.");return}
+  persist();
+}
+function skipScheduledPlan(date){
+  const schedule=state.settings.weeklySchedule;schedule.skippedDates||={};schedule.skippedDates[date]=true;delete schedule.overrides?.[date];persist();
+}
+function moveScheduledPlan(planId,fromDate,toDate){
+  if(!toDate||toDate<=fromDate){alert("Choose a later day to move this Plan to.");return}
+  const schedule=state.settings.weeklySchedule;schedule.skippedDates||={};schedule.overrides||={};
+  const alreadyScheduled=schedulePlanIdForDate(toDate);
+  if((schedule.overrides[toDate]||alreadyScheduled&&alreadyScheduled!==planId)&&!confirm(`A Plan is already scheduled for ${prettyDate(toDate)}. Replace it for that day?`))return;
+  schedule.skippedDates[fromDate]=true;schedule.skippedDates[toDate]=false;schedule.overrides[toDate]=planId;persist();
+}
 function renderWorkout(){
-  const host=$("workoutSections"),w=workoutFor(selectedDate);host.innerHTML="";renderTodayMuscleFocus(w);
+  const host=$("workoutSections"),w=workoutFor(selectedDate);host.innerHTML="";renderTodayMuscleFocus(w);renderScheduledPlan(w);
   if(!w?.items?.length){host.innerHTML='<p class="muted">No workout planned for this date.</p>';return}
   for(const group of workoutGroups(w)){
     const entries=group.items,doneCount=entries.filter(isDone).length;
@@ -338,16 +378,69 @@ function showReference(ex){
 }
 
 function renderPlans(){
-  const host=$("plansList");
-  if(!state.plans.length){host.innerHTML='<article class="card"><p class="muted">No plans yet.</p></article>';return}
-  host.innerHTML=state.plans.map(p=>{
-    const count=(p.items||[]).length,summary=calculateMuscleFocus(exercisesFromItems(p.items));
-    const focus=focusSummaryHtml({main:summary.main,also:summary.also});
-    return `<article class="list-card"><strong>${escapeHtml(p.name)}</strong>${p.notes?`<p class="muted plan-notes">${escapeHtml(p.notes)}</p>`:'<p class="muted plan-notes">No notes</p>'}${focus?`<div class="plan-focus-inline">${focus}</div>`:'<p class="muted">No muscle details</p>'}<p class="plan-exercise-count">${count} exercise${count===1?"":"s"}</p><div class="actions"><button class="secondary edit-plan" data-id="${p.id}">Edit</button><button class="secondary duplicate-plan" data-id="${p.id}">Duplicate</button><button class="danger delete-plan" data-id="${p.id}">Delete</button></div></article>`;
+  const host=$("plansList"),active=state.plans.filter(plan=>!plan.archived),archived=state.plans.filter(plan=>plan.archived);
+  renderWeeklyScheduleSummary();
+  const cards=plans=>plans.map(plan=>{
+    const count=(plan.items||[]).length,summary=calculateMuscleFocus(exercisesFromItems(plan.items)),focus=focusSummaryHtml({main:summary.main,also:summary.also});
+    return `<article class="list-card"><strong>${escapeHtml(plan.name)}</strong>${plan.archived?'<span class="plan-card-badge">Archived</span>':''}${plan.notes?`<p class="muted plan-notes">${escapeHtml(plan.notes)}</p>`:'<p class="muted plan-notes">No notes</p>'}${focus?`<div class="plan-focus-inline">${focus}</div>`:'<p class="muted">No muscle details</p>'}<p class="plan-exercise-count">${count} exercise${count===1?"":"s"}</p><div class="actions"><button class="secondary edit-plan" data-id="${escapeHtml(plan.id)}">Edit</button><button class="secondary duplicate-plan" data-id="${escapeHtml(plan.id)}">Duplicate</button><button class="secondary toggle-archive-plan" data-id="${escapeHtml(plan.id)}">${plan.archived?"Restore":"Archive"}</button></div></article>`;
   }).join("");
-  host.querySelectorAll(".edit-plan").forEach(b=>b.onclick=()=>openPlan(state.plans.find(x=>x.id===b.dataset.id)));
-  host.querySelectorAll(".duplicate-plan").forEach(b=>b.onclick=()=>{const p=structuredClone(state.plans.find(x=>x.id===b.dataset.id));p.id=uid();p.name+=" Copy";state.plans.push(p);persist()});
-  host.querySelectorAll(".delete-plan").forEach(b=>b.onclick=()=>{if(confirm("Delete this plan?")){state.plans=state.plans.filter(x=>x.id!==b.dataset.id);persist()}});
+  host.innerHTML=active.length?cards(active):'<article class="card"><p class="muted">No active Plans. Add a Plan or restore one from the archive below.</p></article>';
+  if(archived.length)host.insertAdjacentHTML("beforeend",`<details class="plan-archive"><summary>Archived Plans <span class="plan-archive-count">(${archived.length})</span></summary><div class="plan-archive-list">${cards(archived)}</div></details>`);
+  host.querySelectorAll(".edit-plan").forEach(button=>button.onclick=()=>openPlan(planById(button.dataset.id)));
+  host.querySelectorAll(".duplicate-plan").forEach(button=>button.onclick=()=>{const plan=structuredClone(planById(button.dataset.id));plan.id=uid();plan.name+=" Copy";plan.archived=false;state.plans.push(plan);persist()});
+  host.querySelectorAll(".toggle-archive-plan").forEach(button=>button.onclick=()=>{const plan=planById(button.dataset.id);if(!plan)return;if(!plan.archived&&planIsInWeeklySchedule(plan.id))return alert("This Plan is in your weekly routine. Change the routine before archiving this Plan.");plan.archived=!plan.archived;persist()});
+}
+function renderWeeklyScheduleSummary(){
+  const host=$("weeklyScheduleSummary"),schedule=state.settings?.weeklySchedule;
+  if(!schedule){host.innerHTML='<article class="card weekly-schedule-card"><h3>Weekly routine</h3><p class="muted">Choose how often you want to work out and which saved Plan to follow on each day. Your routine repeats every week until you change it.</p><button id="editWeeklyScheduleBtn" class="full">Set up weekly routine</button></article>'}
+  else{
+    const days=(schedule.days||[]).slice().sort((a,b)=>a-b),dayLabels=days.map(day=>weekdayNames[day]).join(", "),rows=days.map(day=>`${weekdayNames[day]}: ${escapeHtml(planById(scheduledPlanForDay(schedule,day))?.name||"Choose a Plan")}`).join(" · ");
+    host.innerHTML=`<article class="card weekly-schedule-card"><h3>Weekly routine ${schedule.enabled?'<span class="plan-card-badge">Repeats weekly</span>':'<span class="plan-card-badge">Paused</span>'}</h3><p class="schedule-days-summary">${days.length} workout day${days.length===1?"":"s"}: ${escapeHtml(dayLabels||"No days selected")}</p><p class="schedule-assignments-summary">${rows}</p><div class="actions"><button id="editWeeklyScheduleBtn" class="secondary">Change routine</button><button id="toggleWeeklyScheduleBtn" class="secondary">${schedule.enabled?"Pause":"Resume"}</button></div></article>`;
+  }
+  $("editWeeklyScheduleBtn").onclick=openWeeklySchedule;
+  const toggle=$("toggleWeeklyScheduleBtn");if(toggle)toggle.onclick=()=>{state.settings.weeklySchedule.enabled=!state.settings.weeklySchedule.enabled;persist()};
+}
+function planOptionsHtml(selectedId=""){
+  const choices=state.plans.filter(plan=>!plan.archived||plan.id===selectedId);
+  if(!choices.length)return '<option value="">No active Plans — create one first</option>';
+  return '<option value="">Choose a Plan</option>'+choices.map(plan=>`<option value="${escapeHtml(plan.id)}" ${plan.id===selectedId?"selected":""}>${escapeHtml(plan.name)}${plan.archived?" (archived)":""}</option>`).join("");
+}
+function openWeeklySchedule(){
+  const current=state.settings.weeklySchedule;
+  weeklyScheduleDraft=current?structuredClone(current):{enabled:true,days:[],mode:"same",planId:"",rotationPlanIds:[],assignments:{},skippedDates:{},overrides:{}};
+  const count=$("scheduleDaysPerWeek");count.innerHTML=Array.from({length:7},(_,index)=>`<option value="${index+1}">${index+1} day${index?"s":""}</option>`).join("");
+  count.value=String(weeklyScheduleDraft.days?.length||3);
+  count.onchange=renderScheduleAssignments;
+  $("scheduleDayChoices").innerHTML=weekdayNames.map((name,day)=>`<label class="schedule-day-choice"><input type="checkbox" data-schedule-day="${day}" ${weeklyScheduleDraft.days?.includes(day)?"checked":""}><span>${weekdayShortNames[day]}</span></label>`).join("");
+  $("scheduleMode").value=weeklyScheduleDraft.mode||"same";$("scheduleFormError").classList.add("hidden");
+  $("scheduleDayChoices").querySelectorAll("input").forEach(input=>input.onchange=()=>{captureScheduleAssignments();renderScheduleAssignments()});
+  $("scheduleMode").onchange=()=>{captureScheduleAssignments();weeklyScheduleDraft.mode=$("scheduleMode").value;renderScheduleAssignments()};
+  renderScheduleAssignments();showDialog("weeklyScheduleDialog");
+}
+function selectedScheduleDays(){return [...$("scheduleDayChoices").querySelectorAll("input:checked")].map(input=>Number(input.dataset.scheduleDay)).sort((a,b)=>a-b)}
+function captureScheduleAssignments(){
+  if(!weeklyScheduleDraft)return;
+  const mode=$("scheduleMode")?.value||weeklyScheduleDraft.mode;
+  if(mode==="same")weeklyScheduleDraft.planId=$("scheduleSamePlan")?.value||weeklyScheduleDraft.planId||"";
+  if(mode==="alternate")weeklyScheduleDraft.rotationPlanIds=[$("schedulePlanA")?.value||weeklyScheduleDraft.rotationPlanIds?.[0]||"",$("schedulePlanB")?.value||weeklyScheduleDraft.rotationPlanIds?.[1]||""];
+  if(mode==="by-day"){
+    weeklyScheduleDraft.assignments||={};
+    for(const select of $("schedulePlanAssignments").querySelectorAll("select[data-plan-day]"))weeklyScheduleDraft.assignments[select.dataset.planDay]=select.value;
+  }
+}
+function renderScheduleAssignments(){
+  const days=selectedScheduleDays(),mode=$("scheduleMode").value,host=$("schedulePlanAssignments");
+  const count=Number($("scheduleDaysPerWeek").value)||3;
+  $("scheduleDaysPerWeek").setAttribute("aria-label",`${count} workout days per week`);
+  if(days.length!==count){$("scheduleFormError").textContent=`Select exactly ${count} workout day${count===1?"":"s"}.`;$("scheduleFormError").classList.remove("hidden")}
+  else $("scheduleFormError").classList.add("hidden");
+  if(!state.plans.some(plan=>!plan.archived)){host.innerHTML='<p class="muted">Add or restore a Plan before setting up a weekly routine.</p>';return}
+  if(mode==="same")host.innerHTML=`<label><span>Plan for each workout day</span><select id="scheduleSamePlan">${planOptionsHtml(weeklyScheduleDraft.planId)}</select></label>`;
+  else if(mode==="alternate"){
+    const ids=weeklyScheduleDraft.rotationPlanIds||[];
+    host.innerHTML=`<label><span>Plan A</span><select id="schedulePlanA">${planOptionsHtml(ids[0])}</select></label><label><span>Plan B</span><select id="schedulePlanB">${planOptionsHtml(ids[1])}</select></label><p class="muted routine-kind">The Plans alternate across your selected days each week. For three days, that is A / B / A.</p>`;
+  }else host.innerHTML=days.map(day=>`<label class="schedule-plan-row"><span>${weekdayNames[day]}</span><select data-plan-day="${day}">${planOptionsHtml(weeklyScheduleDraft.assignments?.[day])}</select></label>`).join("")||'<p class="muted">Choose your workout days first.</p>';
+  host.querySelectorAll("select").forEach(select=>select.onchange=()=>captureScheduleAssignments());
 }
 function openPlan(plan=null){
   planDraft=plan?structuredClone(plan):{id:"",name:"",notes:"",intendedFocus:[],items:[]};
@@ -391,13 +484,19 @@ function addCurrentPlanItem(){
   const options=ex.category==="cardio"?{intervals:[...intervalDraft]}:{sets:Number($("planSets").value)||1,reps:Number($("planReps").value)||1};
   planDraft.items.push(createPlanItem(ex,options));intervalDraft=[10,10];renderPlanDraft();populatePlanExerciseOptions();renderPlanIntervals();
 }
-function addPlanToWorkout(plan,selectedItemIds=null){
+function addPlanToWorkout(plan,selectedItemIds=null,{lighter=false}={}){
   const w=workoutFor(selectedDate,true),used=new Set(w.items.map(x=>x.exerciseId)),source=(plan.items||[]).filter(x=>!used.has(x.exerciseId)&&(!selectedItemIds||selectedItemIds.has(x.id)));
   for(const item of source){
     const ex=exById(item.exerciseId)||{id:item.exerciseId,name:item.exerciseName||"Exercise",category:item.category||"strength"};
     const options=item.type==="cardio"?{intervals:item.intervals||[10]}:{sets:item.sets||1,reps:item.reps||1};
     const sourceInfo={sourcePlanId:plan.id,sourcePlanName:plan.name,sourcePlanItemId:item.id};
-    w.items.push(createSessionItem(ex,options,selectedDate,sourceInfo));
+    const sessionItem=createSessionItem(ex,options,selectedDate,sourceInfo);
+    if(lighter&&sessionItem.type==="cardio")sessionItem.intervals=sessionItem.intervals.map(interval=>({...interval,minutes:Math.max(1,Math.round(interval.minutes*.8))}));
+    else if(lighter&&sessionItem.category==="strength"){
+      if(sessionItem.sets.length>1)sessionItem.sets=sessionItem.sets.slice(0,-1);
+      sessionItem.sets=sessionItem.sets.map(set=>({...set,weight:Math.round(set.weight*.85*10)/10}));
+    }
+    w.items.push(sessionItem);
   }
   if(!w.planIds.includes(plan.id))w.planIds.push(plan.id);
   return source.length;
@@ -414,13 +513,13 @@ function renderAddToIntervals(){
 }
 function populateAddToPlans(ex){
   const select=$("addToPlanSelect");select.innerHTML="";let firstEnabled=null;
-  for(const plan of state.plans){
+  for(const plan of state.plans.filter(value=>!value.archived)){
     const option=document.createElement("option"),added=(plan.items||[]).some(item=>item.exerciseId===ex.id);
     option.value=plan.id;option.textContent=added?`✓ ${plan.name} — Added`:plan.name;option.disabled=added;
     if(!added&&!firstEnabled)firstEnabled=option;
     select.appendChild(option);
   }
-  if(!state.plans.length){const option=document.createElement("option");option.value="";option.textContent="No saved plans";option.disabled=true;option.selected=true;select.appendChild(option)}
+  if(!state.plans.some(plan=>!plan.archived)){const option=document.createElement("option");option.value="";option.textContent="No active plans";option.disabled=true;option.selected=true;select.appendChild(option)}
   else if(!firstEnabled){const option=document.createElement("option");option.value="";option.textContent="Already added to every plan";option.disabled=true;option.selected=true;select.prepend(option)}
   else firstEnabled.selected=true;
 }
@@ -692,8 +791,9 @@ function selectionOptionHtml({value,name,detail,checked=false,disabled=false,kin
 }
 function renderAvailablePlans(){
   const host=$("availablePlansList"),used=workoutUsedExerciseIds();
-  if(!state.plans.length){host.innerHTML='<p class="empty-selection muted">No saved plans.</p>';return}
-  host.innerHTML=state.plans.map(plan=>{
+  const activePlans=state.plans.filter(plan=>!plan.archived);
+  if(!activePlans.length){host.innerHTML='<p class="empty-selection muted">No active Plans. Restore an archived Plan or add exercises directly.</p>';return}
+  host.innerHTML=activePlans.map(plan=>{
     const total=(plan.items||[]).length,available=availablePlanItems(plan,used).length,disabled=!available;
     const detail=!total?"Empty plan":disabled?"All exercises added":`${available} exercise${available===1?"":"s"} available`;
     return selectionOptionHtml({value:plan.id,name:plan.name,detail,checked:plan.id===addWorkoutPlanId,disabled,kind:"plan"});
@@ -733,7 +833,7 @@ function updateAddWorkoutSelectionStatus(){
 }
 function populateAddWorkout(){
   addWorkoutPlanSelection=new Set();addWorkoutExerciseSelection=new Set();$("addWorkoutExerciseSearch").value="";
-  const firstPlan=state.plans.find(plan=>availablePlanItems(plan).length);addWorkoutPlanId=firstPlan?.id||"";
+  const firstPlan=state.plans.find(plan=>!plan.archived&&availablePlanItems(plan).length);addWorkoutPlanId=firstPlan?.id||"";
   if(firstPlan)addWorkoutPlanSelection=new Set(availablePlanItems(firstPlan).map(item=>item.id));
   renderAvailablePlans();renderAvailablePlanExercises();renderAvailableExercisesList();updateAddWorkoutSelectionStatus();
 }
@@ -874,6 +974,27 @@ $("addToPlanSelect").onchange=updateAddToStatus;$("addToNewPlanName").oninput=up
 $("addToForm").onsubmit=e=>{e.preventDefault();const ex=exById($("addToExerciseId").value),target=selectedAddToTarget();if(!ex)return alert("Exercise not found.");const options=addToFormOptions(ex);if(target==="today"){if(!addActivityToSession(ex,todayKey(),options))return alert("Exercise already added to today’s workout.")}else if(target==="existing-plan"){const plan=planById($("addToPlanSelect").value);if(!plan)return alert("No available plan.");plan.items ||= [];if(plan.items.some(item=>item.exerciseId===ex.id))return alert("Exercise already added to this plan.");plan.items.push(createPlanItem(ex,options))}else{const name=$("addToNewPlanName").value.trim();if(!name)return alert("Enter a plan name.");state.plans.push({id:uid(),name,notes:"",intendedFocus:[],items:[createPlanItem(ex,options)]})}closeDialog("addToDialog");persist()};
 $("librarySearch").oninput=renderLibrary;
 $("addPlanBtn").onclick=()=>openPlan();$("planCategorySelect").onchange=()=>{populatePlanExerciseOptions();updatePlanFields();intervalDraft=[10,10];renderPlanIntervals()};$("planExerciseSearch").oninput=populatePlanExerciseOptions;$("addPlanCardioIntervalBtn").onclick=()=>{intervalDraft.push(intervalDraft.at(-1)||10);renderPlanIntervals()};$("addPlanItemInlineBtn").onclick=addCurrentPlanItem;
+$("weeklyScheduleForm").onsubmit=event=>{
+  event.preventDefault();captureScheduleAssignments();
+  const days=selectedScheduleDays(),expected=Number($("scheduleDaysPerWeek").value),mode=$("scheduleMode").value;
+  if(days.length!==expected){$("scheduleFormError").textContent=`Select exactly ${expected} workout day${expected===1?"":"s"}.`;$("scheduleFormError").classList.remove("hidden");return}
+  const schedule={...(state.settings.weeklySchedule||{}),enabled:true,days,mode};
+  if(mode==="same"){
+    schedule.planId=$("scheduleSamePlan")?.value||weeklyScheduleDraft.planId||"";
+    if(!planById(schedule.planId)||planById(schedule.planId).archived){$("scheduleFormError").textContent="Choose an active Plan.";$("scheduleFormError").classList.remove("hidden");return}
+    delete schedule.rotationPlanIds;delete schedule.assignments;
+  }else if(mode==="alternate"){
+    schedule.rotationPlanIds=[$("schedulePlanA")?.value||weeklyScheduleDraft.rotationPlanIds?.[0]||"",$("schedulePlanB")?.value||weeklyScheduleDraft.rotationPlanIds?.[1]||""];
+    if(schedule.rotationPlanIds.some(id=>!planById(id)||planById(id).archived)||schedule.rotationPlanIds[0]===schedule.rotationPlanIds[1]){ $("scheduleFormError").textContent="Choose two different active Plans to alternate.";$("scheduleFormError").classList.remove("hidden");return }
+    delete schedule.planId;delete schedule.assignments;
+  }else{
+    schedule.assignments={};
+    for(const day of days){const select=$("schedulePlanAssignments").querySelector(`select[data-plan-day="${day}"]`);schedule.assignments[day]=select?.value||weeklyScheduleDraft.assignments?.[day]||""}
+    if(days.some(day=>!planById(schedule.assignments[day])||planById(schedule.assignments[day]).archived)){$("scheduleFormError").textContent="Choose an active Plan for each workout day.";$("scheduleFormError").classList.remove("hidden");return}
+    delete schedule.planId;delete schedule.rotationPlanIds;
+  }
+  state.settings.weeklySchedule=schedule;closeDialog("weeklyScheduleDialog");persist();
+};
 $("planForm").onsubmit=e=>{e.preventDefault();planDraft.name=$("planName").value.trim();planDraft.notes=$("planNotes").value.trim();if(!planDraft.name)return;planDraft.id=planDraft.id||uid();const i=state.plans.findIndex(x=>x.id===planDraft.id);if(i>=0)state.plans[i]=structuredClone(planDraft);else state.plans.push(structuredClone(planDraft));closeDialog("planDialog");persist()};
 $("openTeacherExportBtn").onclick=openTeacherExport;
 $("teacherBeginDate").onchange=updateTeacherExportStatus;
@@ -918,7 +1039,7 @@ $("cloudCreateAccountBtn").onclick=()=>cloudAuthMode==="sign-in"?setCloudAuthMod
 $("cloudInitializeBtn").onclick=()=>runCloudAction($("cloudInitializeBtn"),initializeCloud);
 $("cloudSyncNowBtn").onclick=()=>runCloudAction($("cloudSyncNowBtn"),syncNow);
 $("cloudSignOutBtn").onclick=()=>runCloudAction($("cloudSignOutBtn"),signOut);
-if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js?v=1.5.0",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
+if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js?v=1.6.0",{updateViaCache:"none"}).then(registration=>registration.update()).catch(()=>{});
 async function initializeApp(){
   try{
     requestPersistentPhotoStorage();

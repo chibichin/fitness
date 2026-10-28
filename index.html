@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111827">
   <title>Fitness Record</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/app.css?v=1.5.0">
+  <link rel="stylesheet" href="css/app.css?v=1.6.0">
 </head>
 <body>
 <header class="topbar">
@@ -49,6 +49,7 @@
         </div>
         <button id="openAddWorkoutBtn">Add</button>
       </div>
+      <div id="scheduledPlanHost"></div>
       <div id="todayMuscleFocus" class="muscle-focus-summary hidden"></div>
       <div id="workoutSections"></div>
     </article>
@@ -56,6 +57,7 @@
 
   <section id="plansView" class="view">
     <div class="section-head page-heading"><h2>Plans</h2><button id="addPlanBtn">Add plan</button></div>
+    <div id="weeklyScheduleSummary"></div>
     <div id="plansList"></div>
   </section>
 
@@ -105,7 +107,7 @@
     </article>
     <article class="card">
       <h3>About</h3>
-    <p class="muted">Version 1.5.0 — Cloud sync.</p>
+    <p class="muted">Version 1.6.0 — Weekly routines and archived Plans.</p>
     </article>
   </section>
 </main>
@@ -117,6 +119,24 @@
   <button data-view="progressView">Progress</button>
   <button data-view="settingsView">Settings</button>
 </nav>
+
+<dialog id="weeklyScheduleDialog" class="wide-dialog">
+  <form id="weeklyScheduleForm">
+    <div class="dialog-title"><h3>Weekly workout routine</h3><button type="button" class="secondary icon-button" data-close="weeklyScheduleDialog">×</button></div>
+    <p class="muted field-help">Choose your workout days and the Plan for each day. This routine repeats every week until you change it.</p>
+    <label><span>How many days a week?</span><select id="scheduleDaysPerWeek"></select></label>
+    <fieldset class="choice-fieldset schedule-day-fieldset"><legend>Which days?</legend><div id="scheduleDayChoices" class="schedule-day-choices"></div></fieldset>
+    <label><span>How should your Plans be arranged?</span><select id="scheduleMode">
+      <option value="same">Repeat one Plan on every workout day</option>
+      <option value="alternate">Alternate two Plans (for example, Upper / Lower)</option>
+      <option value="by-day">Choose a Plan for each day (for example, Push / Pull / Legs)</option>
+    </select></label>
+    <p class="muted field-help">The examples are optional. You can use any Plans you have already saved.</p>
+    <div id="schedulePlanAssignments" class="schedule-plan-assignments"></div>
+    <p id="scheduleFormError" class="form-error hidden" role="alert"></p>
+    <div class="dialog-actions"><button type="button" class="secondary" data-close="weeklyScheduleDialog">Cancel</button><button type="submit">Save weekly routine</button></div>
+  </form>
+</dialog>
 
 <dialog id="addWorkoutDialog" class="wide-dialog">
   <form id="addWorkoutForm">
@@ -343,6 +363,6 @@
 </dialog>
 
 
-<script type="module" src="js/app.js?v=1.5.0"></script>
+<script type="module" src="js/app.js?v=1.6.0"></script>
 </body>
 </html>

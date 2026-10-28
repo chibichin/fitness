@@ -1,7 +1,7 @@
-import {SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY} from "./cloud-config.js?v=1.5.0";
-import {mergeStates} from "./sync-core.js?v=1.5.0";
-import {getSyncMeta,saveRemoteState} from "./storage.js?v=1.5.0";
-import {getAllPhotos,getPhoto,putPhoto} from "./photo-store.js?v=1.5.0";
+import {SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY} from "./cloud-config.js?v=1.6.0";
+import {mergeStates} from "./sync-core.js?v=1.6.0";
+import {getSyncMeta,saveRemoteState} from "./storage.js?v=1.6.0";
+import {getAllPhotos,getPhoto,putPhoto} from "./photo-store.js?v=1.6.0";
 
 const SESSION_KEY="fitness-record-cloud-session-v1";
 const OWNER_KEY="fitness-record-cloud-owner-v1";

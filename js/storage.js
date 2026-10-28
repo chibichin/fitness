@@ -1,4 +1,4 @@
-import {createSyncMeta,recordStateChanges} from "./sync-core.js?v=1.5.0";
+import {createSyncMeta,recordStateChanges} from "./sync-core.js?v=1.6.0";
 
 export const KEY="fitness-record-v1";
 export const SYNC_META_KEY="fitness-record-sync-meta-v1";
@@ -54,6 +54,7 @@ export function loadState(){
     });
     s.plans = s.plans.map(({warmupAdditions,...p})=>({
       ...p,
+      archived:Boolean(p.archived),
       intendedFocus:splitMuscles(p.intendedFocus),
       items:[...(warmupAdditions||[]),...(p.items||[])].map(i=>({...i,exerciseName:i.exerciseName||s.exercises.find(e=>e.id===i.exerciseId)?.name||"Exercise"}))
     }));
